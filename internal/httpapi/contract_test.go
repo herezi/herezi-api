@@ -20,10 +20,12 @@ type openAPI struct {
 		Parameters []struct {
 			Name   string `yaml:"name"`
 			Schema struct {
-				Enum    []string `yaml:"enum"`
-				Default any      `yaml:"default"`
-				Minimum *float64 `yaml:"minimum"`
-				Maximum *float64 `yaml:"maximum"`
+				Enum      []string `yaml:"enum"`
+				Default   any      `yaml:"default"`
+				Minimum   *float64 `yaml:"minimum"`
+				Maximum   *float64 `yaml:"maximum"`
+				MinLength *int     `yaml:"minLength"`
+				MaxLength *int     `yaml:"maxLength"`
 			} `yaml:"schema"`
 		} `yaml:"parameters"`
 	} `yaml:"paths"`
@@ -164,7 +166,7 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 		limits map[string]lim
 	}{
 		"/v1/spots": {
-			names: []string{"category", "cursor", "free", "lat", "limit", "lng", "radius_m", "when"},
+			names: []string{"category", "cursor", "free", "lat", "limit", "lng", "q", "radius_m", "when"},
 			limits: map[string]lim{
 				"radius_m": {defaultRadiusM, minRadiusM, maxRadiusM},
 				"limit":    {defaultLimit, 1, maxLimit},
@@ -192,4 +194,20 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 			t.Errorf("%s: openapi params %v, handled %v", path, names, want.names)
 		}
 	}
+}
+
+// TestKeywordLengthMatchesOpenAPI: q의 minLength/maxLength가 핸들러 제한과 같아야 한다.
+func TestKeywordLengthMatchesOpenAPI(t *testing.T) {
+	doc := loadOpenAPI(t)
+	for _, p := range doc.Paths["/v1/spots"]["get"].Parameters {
+		if p.Name != "q" {
+			continue
+		}
+		sc := p.Schema
+		if sc.MinLength == nil || sc.MaxLength == nil || *sc.MinLength != minQueryRunes || *sc.MaxLength != maxQueryRunes {
+			t.Fatalf("openapi q minLength=%v maxLength=%v, code [%d, %d]", sc.MinLength, sc.MaxLength, minQueryRunes, maxQueryRunes)
+		}
+		return
+	}
+	t.Fatal("q not found in openapi /v1/spots")
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	pgdriver "gorm.io/driver/postgres"
@@ -110,13 +111,28 @@ func filter(f store.SpotFilter) func(*gorm.DB) *gorm.DB {
 	}
 }
 
+// likeEscaper escapes LIKE metacharacters so the keyword matches literally (ESCAPE '\').
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// keyword applies store.NearbyQuery.Keyword: 제목·장소명·주소 ILIKE 부분 일치.
+// migrations/00003의 pg_trgm GIN 인덱스를 탄다(3글자 이상일 때 효과적).
+func keyword(kw string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if kw == "" {
+			return db
+		}
+		pat := "%" + likeEscaper.Replace(kw) + "%"
+		return db.Where(`(title ILIKE ? ESCAPE '\' OR place_name ILIKE ? ESCAPE '\' OR address ILIKE ? ESCAPE '\')`, pat, pat, pat)
+	}
+}
+
 // NearbySpots implements store.SpotReader.
 func (s *Store) NearbySpots(ctx context.Context, q store.NearbyQuery) ([]domain.Spot, error) {
 	pt := point(q.Lat, q.Lng)
 	tx := s.db.WithContext(ctx).Model(&spotRow{}).
 		Select(spotColumns+", ST_Distance(geog, ?) AS distance_m", pt).
 		Where("ST_DWithin(geog, ?, ?)", pt, float64(q.RadiusM)).
-		Scopes(filter(q.SpotFilter)).
+		Scopes(filter(q.SpotFilter), keyword(q.Keyword)).
 		Order("distance_m, id").
 		Offset(q.Offset)
 	if q.Limit > 0 {

@@ -111,6 +111,22 @@ func (s Spot) Ended(now time.Time) bool {
 	return s.EndsAt != nil && s.EndsAt.Before(now)
 }
 
+// MatchesKeyword reports whether kw appears (case-insensitive substring) in the
+// title, place name or address. 빈 kw는 모두 일치. 호출자가 공백을 잘라서 넘긴다.
+// postgres 저장소의 ILIKE '%kw%'와 같은 의미다.
+func (s Spot) MatchesKeyword(kw string) bool {
+	if kw == "" {
+		return true
+	}
+	kw = strings.ToLower(kw)
+	for _, f := range []string{s.Title, s.PlaceName, s.Address} {
+		if strings.Contains(strings.ToLower(f), kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // Free reports whether the spot is known to be free. Unknown (nil) counts as not free.
 func (s Spot) Free() bool { return s.IsFree != nil && *s.IsFree }
 

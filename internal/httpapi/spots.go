@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/herezi/herezi-api/internal/domain"
 	"github.com/herezi/herezi-api/internal/store"
@@ -25,6 +26,9 @@ const (
 	// /v1/spots/map
 	defaultMapLimit = 200
 	maxMapLimit     = 500
+	// q (키워드 검색): 앞뒤 공백을 자른 뒤 글자(rune) 수
+	minQueryRunes = 1
+	maxQueryRunes = 50
 )
 
 // cacheControl is sent on successful spot responses (TECH-PLAN.md §4).
@@ -164,7 +168,21 @@ func (s *Server) parseListQuery(r *http.Request) (store.NearbyQuery, error) {
 	if q.Offset, err = decodeCursor(v.Get("cursor")); err != nil {
 		return q, err
 	}
+	if v.Has("q") {
+		if q.Keyword, err = parseKeyword(v.Get("q")); err != nil {
+			return q, err
+		}
+	}
 	return q, nil
+}
+
+// parseKeyword trims q and checks its length in runes (한글 한 글자 = 1).
+func parseKeyword(raw string) (string, error) {
+	kw := strings.TrimSpace(raw)
+	if n := utf8.RuneCountInString(kw); n < minQueryRunes || n > maxQueryRunes {
+		return "", fmt.Errorf("q must be %d to %d characters after trimming whitespace", minQueryRunes, maxQueryRunes)
+	}
+	return kw, nil
 }
 
 func (s *Server) parseBBoxQuery(r *http.Request) (store.BBoxQuery, error) {

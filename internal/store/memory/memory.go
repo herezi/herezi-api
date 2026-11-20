@@ -72,7 +72,7 @@ func (s *Store) NearbySpots(_ context.Context, q store.NearbyQuery) ([]domain.Sp
 	s.mu.RLock()
 	var hits []distSpot
 	for _, sp := range s.spots {
-		if !q.Match(sp) {
+		if !q.Match(sp) || !sp.MatchesKeyword(q.Keyword) {
 			continue
 		}
 		d := domain.DistanceM(q.Lat, q.Lng, sp.Lat, sp.Lng)
