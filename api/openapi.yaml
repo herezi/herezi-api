@@ -38,6 +38,10 @@ paths:
         - name: when
           in: query
           schema: { type: string, enum: [now, today, weekend, week], default: now }
+        - name: free
+          in: query
+          description: true면 무료 항목만
+          schema: { type: boolean, default: false }
         - name: cursor
           in: query
           schema: { type: string }
@@ -75,7 +79,7 @@ components:
   schemas:
     Category:
       type: string
-      enum: [nature, festival, performance, exhibition, popup, food, family, pet, sports, free]
+      enum: [nature, festival, performance, exhibition, popup, food, family, pet, sports]
     Spot:
       type: object
       required: [id, title, category, lat, lng, starts_at, source]
