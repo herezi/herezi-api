@@ -18,7 +18,7 @@ Go(go.mod 버전), 표준 `net/http`, **GORM**(pgx 드라이버) + PostgreSQL/**
 - 비밀값은 환경변수로만. 커밋 금지.
 
 ## 작업 흐름
-1. `git checkout main && git pull` → `feat/<짧은-이름>` 브랜치.
+1. `git checkout develop && git pull` → `feat/<짧은-이름>` 브랜치.
 2. 구현 + 테스트 → `make check` 통과.
 3. 커밋(한국어 conventional), PR(`Closes #n`, 변경 요약, 테스트 결과).
 4. `reviewer`·`qa` 검토를 받을 수 있게 PR 링크와 확인 방법(curl 예시)을 보고한다.

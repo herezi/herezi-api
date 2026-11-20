@@ -50,7 +50,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 
 ## 규칙
 1. **이슈 → 브랜치 → PR → 머지.** 모든 작업은 GitHub 이슈에서 시작하고, 브랜치(`feat/…`, `fix/…`, `chore/…`, `docs/…`)에서 PR을 만든다. PR 본문에 `Closes #n`.
-2. **main에 직접 푸시하지 않는다.** `make check`와 CI가 통과한 PR만 squash 머지한다.
+2. **브랜치 전략:** `feat/*`·`fix/*`·`chore/*` → `develop`(기본 브랜치)으로 PR. `main`은 출시 전용이며 `develop` → `main` 릴리스 PR로만 바뀐다. **main·develop에 직접 푸시하지 않는다.** `make check`와 CI가 통과한 PR만 squash 머지한다.
 3. **기획 먼저, 코드는 승인 후.** 새 기능·큰 변경은 관련 기획 문서(docs/product)가 승인된 뒤에 구현한다. 기획에 없는 동작이 필요하면 먼저 문서를 고치는 PR을 낸다.
 4. **`api/openapi.yaml`이 계약의 단일 기준.** 엔드포인트·필드·enum을 바꾸면 openapi를 먼저(같은 PR에서) 고친다. 계약 테스트(`internal/httpapi/contract_test.go`)가 카테고리 enum·라우트·JSON 필드를 대조한다. 하위호환을 지킨다(필드 삭제·의미 변경 금지, 추가는 가능).
 5. **큰 결정은 ADR로.** 스택·저장소·외부 서비스·계층 규칙을 바꾸는 결정은 `docs/adr/NNNN-제목.md`로 남기고 TECH-PLAN.md도 함께 고친다.
