@@ -256,6 +256,10 @@ func TestListSpotsBadParams(t *testing.T) {
 		"free not bool":      near("free", "yes"),
 		"cursor garbage":     near("cursor", "!!!"),
 		"cursor negative":    near("cursor", "bzotMQ"), // base64("o:-1")
+		"q empty":            near("q", ""),
+		"q only spaces":      near("q", "   "),
+		"q too long":         near("q", strings.Repeat("가", 51)),
+		"q missing lat":      {"lng": {"126.9779"}, "q": {"서울"}},
 	}
 	for name, params := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -268,6 +272,52 @@ func TestListSpotsBadParams(t *testing.T) {
 				t.Fatalf("error body %+v", e)
 			}
 		})
+	}
+}
+
+func TestListSpotsKeyword(t *testing.T) {
+	srv := newServer(t)
+	cases := []struct {
+		name   string
+		params url.Values
+		want   []string
+	}{
+		{"title case-insensitive", near("q", "Festival"), []string{"near-festival-free"}},
+		{"trimmed", near("q", "  서울광장 \t"), []string{"near-festival-free"}},
+		{"place name or address, by distance", near("q", "서울"), []string{"near-festival-free", "far-exhibition-unknown"}},
+		{"with category", near("q", "서울", "category", "exhibition"), []string{"far-exhibition-unknown"}},
+		{"percent literal", near("q", "50%"), []string{"far-exhibition-unknown"}},
+		{"50 runes ok", near("q", strings.Repeat("가", 50)), []string{}},
+		{"no match", near("q", "빛초롱"), []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var p page
+			res := get(t, srv, "/v1/spots", tc.params, &p)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("status %d", res.StatusCode)
+			}
+			if p.Items == nil {
+				t.Fatal("items must be [] not null")
+			}
+			if got := ids(p); !slices.Equal(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestListSpotsKeywordPagination(t *testing.T) {
+	srv := newServer(t)
+	var p1 page
+	get(t, srv, "/v1/spots", near("q", "서울", "limit", "1"), &p1)
+	if got := ids(p1); !slices.Equal(got, []string{"near-festival-free"}) || p1.NextCursor == "" {
+		t.Fatalf("page1 %v cursor %q", got, p1.NextCursor)
+	}
+	var p2 page
+	get(t, srv, "/v1/spots", near("q", "서울", "limit", "1", "cursor", p1.NextCursor), &p2)
+	if got := ids(p2); !slices.Equal(got, []string{"far-exhibition-unknown"}) || p2.NextCursor != "" {
+		t.Fatalf("page2 %v cursor %q", got, p2.NextCursor)
 	}
 }
 

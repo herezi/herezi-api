@@ -29,7 +29,7 @@
 ## 핵심 흐름: `GET /v1/spots`
 1. `httpapi`가 쿼리 파라미터를 검증·파싱 → 잘못되면 400 + `Error{code, message}`.
 2. `when`을 `domain.When.Window(now)`로 [from, to] 구간으로 바꾸고 `store.NearbyQuery`를 만든다.
-3. 저장소가 반경·카테고리·무료·기간 겹침·**끝난 행사 제외** 조건으로 거리순 조회.
+3. 저장소가 반경·카테고리·무료·기간 겹침·키워드(`q`: 제목·장소명·주소 ILIKE, pg_trgm 인덱스)·**끝난 행사 제외** 조건으로 거리순 조회.
    - 메모리: 하버사인 거리(`domain.DistanceM`)로 같은 의미를 흉내낸다.
    - postgres: `geography` + `ST_DWithin`/`ST_Distance` (GiST 인덱스).
 4. `limit+1`개를 받아 다음 페이지 유무를 판단하고, 불투명 커서(`next_cursor`)를 돌려준다.

@@ -43,8 +43,13 @@ func (f SpotFilter) Match(sp domain.Spot) bool {
 
 // NearbyQuery selects spots within RadiusM of (Lat, Lng) that match the filter,
 // ordered by distance then ID. Offset/Limit page through the ordered result.
+//
+// Keyword가 비어 있지 않으면 제목·장소명·주소 중 하나에 대소문자 무시 부분 일치하는
+// 항목만 반환한다(domain.Spot.MatchesKeyword). 호출자가 공백을 잘라서 넘긴다.
+// 와일드카드(%, _)는 글자 그대로 취급한다.
 type NearbyQuery struct {
 	SpotFilter
+	Keyword  string
 	Lat, Lng float64
 	RadiusM  int
 	Offset   int

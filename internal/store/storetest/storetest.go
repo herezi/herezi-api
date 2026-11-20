@@ -36,15 +36,24 @@ func Fixtures() []domain.Spot {
 			FetchedAt: FetchedAt,
 		}
 	}
+	// 장소명·주소는 키워드 검색(NearbyQuery.Keyword) 케이스용.
+	withPlace := func(s domain.Spot, place, addr string) domain.Spot {
+		s.PlaceName, s.Address = place, addr
+		return s
+	}
 	return []domain.Spot{
 		// ~0m, ongoing, free
-		sp("near-festival-free", domain.CategoryFestival, 0, Now.Add(-h), ptr(Now.Add(h)), &yes),
+		withPlace(sp("near-festival-free", domain.CategoryFestival, 0, Now.Add(-h), ptr(Now.Add(h)), &yes),
+			"서울광장", "서울 중구 세종대로 110"),
 		// ~1.1km, ongoing, not free
-		sp("mid-popup", domain.CategoryPopup, 0.01, Now.Add(-h), ptr(Now.Add(48*h)), &no),
+		withPlace(sp("mid-popup", domain.CategoryPopup, 0.01, Now.Add(-h), ptr(Now.Add(48*h)), &no),
+			"Seongsu Studio", ""),
 		// ~2.2km, ongoing, free unknown
-		sp("far-exhibition-unknown", domain.CategoryExhibition, 0.02, Now.Add(-h), ptr(Now.Add(48*h)), nil),
+		withPlace(sp("far-exhibition-unknown", domain.CategoryExhibition, 0.02, Now.Add(-h), ptr(Now.Add(48*h)), nil),
+			"", "서울 종로구 50%_할인로 1"),
 		// ~0.5km, ended an hour ago
-		sp("ended", domain.CategoryFestival, 0.005, Now.Add(-3*h), ptr(Now.Add(-h)), &yes),
+		withPlace(sp("ended", domain.CategoryFestival, 0.005, Now.Add(-3*h), ptr(Now.Add(-h)), &yes),
+			"서울광장", ""),
 		// ~0.6km, starts tomorrow
 		sp("tomorrow", domain.CategoryPerformance, 0.006, Now.Add(24*h), ptr(Now.Add(26*h)), &yes),
 		// ~11km, ongoing
@@ -102,6 +111,32 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 		}, []string{"near-festival-free", "mid-popup", "far-exhibition-unknown"}},
 		{"offset and limit", func(q *store.NearbyQuery) { q.Offset, q.Limit = 1, 1 },
 			[]string{"mid-popup"}},
+		{"keyword title case-insensitive", func(q *store.NearbyQuery) { q.Keyword = "POPUP" },
+			[]string{"mid-popup"}},
+		{"keyword place name, ended hidden", func(q *store.NearbyQuery) { q.Keyword = "서울광장" },
+			[]string{"near-festival-free"}},
+		{"keyword place name ascii case-insensitive", func(q *store.NearbyQuery) { q.Keyword = "studio" },
+			[]string{"mid-popup"}},
+		{"keyword address", func(q *store.NearbyQuery) { q.Keyword = "종로구" },
+			[]string{"far-exhibition-unknown"}},
+		{"keyword matches any field, by distance", func(q *store.NearbyQuery) { q.Keyword = "서울" },
+			[]string{"near-festival-free", "far-exhibition-unknown"}},
+		{"keyword percent is literal", func(q *store.NearbyQuery) { q.Keyword = "%" },
+			[]string{"far-exhibition-unknown"}},
+		{"keyword underscore is literal", func(q *store.NearbyQuery) { q.Keyword = "_" },
+			[]string{"far-exhibition-unknown"}},
+		{"keyword backslash is literal", func(q *store.NearbyQuery) { q.Keyword = `\` },
+			[]string{}},
+		{"keyword with other filters", func(q *store.NearbyQuery) {
+			q.Keyword, q.FreeOnly = "festival", true
+			q.From, q.To = domain.WhenWeek.Window(Now)
+		}, []string{"near-festival-free"}},
+		{"keyword respects radius", func(q *store.NearbyQuery) { q.Keyword, q.RadiusM = "too-far", 20000 },
+			[]string{"too-far"}},
+		{"keyword outside radius", func(q *store.NearbyQuery) { q.Keyword = "too-far" },
+			[]string{}},
+		{"keyword no match", func(q *store.NearbyQuery) { q.Keyword = "빛초롱" },
+			[]string{}},
 	}
 	s := setup(t)
 	for _, tc := range cases {

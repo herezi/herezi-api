@@ -83,3 +83,22 @@ func TestCategoriesHaveNoFree(t *testing.T) {
 		t.Errorf("want 9 categories, got %d", len(Categories()))
 	}
 }
+
+func TestMatchesKeyword(t *testing.T) {
+	sp := Spot{Title: "Seoul Lantern 빛초롱", PlaceName: "청계천", Address: "서울 중구 50%_로"}
+	for kw, want := range map[string]bool{
+		"":         true,
+		"lantern":  true,
+		"LANTERN":  true,
+		"빛초롱":      true,
+		"청계":       true,
+		"중구":       true,
+		"%_":       true,
+		"성수":       false,
+		"lanterns": false,
+	} {
+		if got := sp.MatchesKeyword(kw); got != want {
+			t.Errorf("MatchesKeyword(%q) = %v, want %v", kw, got, want)
+		}
+	}
+}

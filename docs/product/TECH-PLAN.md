@@ -61,7 +61,7 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `cursor`, `limit` → 거리순 |
+| GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `q`(키워드: 제목·장소명·주소 부분 일치, 1~50자), `cursor`, `limit` → 거리순 |
 | GET | `/v1/spots/{id}` | 상세 |
 | GET | `/v1/spots/map` | 지도 영역(bbox: `sw_lat`, `sw_lng`, `ne_lat`, `ne_lng`) + `category`, `when`, `free`, 최대 `limit`(기본 200, 최대 500)개, 영역 중심에서 가까운 순. 넘치면 `truncated: true`. 클러스터는 앱에서 처리 |
 | GET | `/healthz` | 헬스체크 |
