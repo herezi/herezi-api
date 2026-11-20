@@ -1,5 +1,5 @@
 // Package store defines persistence interfaces for spots.
-// Implementations: store/memory (tests, local fake) and store/postgres (PostGIS + sqlc).
+// Implementations: store/memory (tests, local fake) and store/postgres (PostGIS + GORM).
 // store may import only internal/domain (see ARCHITECTURE.md).
 package store
 

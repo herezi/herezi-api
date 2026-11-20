@@ -1,5 +1,7 @@
-// Package postgres is the PostGIS-backed store.SpotStore. SQL lives in
-// queries.sql; sqlcdb/ is generated from it by sqlc (`make generate`).
+// Package postgres is the PostGIS-backed store.SpotStore, accessed through GORM (pgx driver).
+//
+// 스키마의 기준은 migrations/(goose SQL)이다. AutoMigrate는 쓰지 않는다 — geography 컬럼과
+// GiST 인덱스를 표현할 수 없다. 공간 조건(ST_DWithin, ST_Distance 등)은 GORM raw 표현식으로 쓴다.
 package postgres
 
 import (
@@ -9,117 +11,190 @@ import (
 	"math"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
+	pgdriver "gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 
 	"github.com/herezi/herezi-api/internal/domain"
 	"github.com/herezi/herezi-api/internal/store"
-	"github.com/herezi/herezi-api/internal/store/postgres/sqlcdb"
 )
+
+// spotRow is the GORM model for the spots table. geog is never read directly:
+// lat/lng/distance_m are computed columns in SELECT (read-only, `->`).
+type spotRow struct {
+	ID        string     `gorm:"column:id;primaryKey"`
+	Source    string     `gorm:"column:source"`
+	SourceID  string     `gorm:"column:source_id"`
+	Title     string     `gorm:"column:title"`
+	Summary   string     `gorm:"column:summary"`
+	Category  string     `gorm:"column:category"`
+	Lat       float64    `gorm:"column:lat;->"`
+	Lng       float64    `gorm:"column:lng;->"`
+	Address   string     `gorm:"column:address"`
+	PlaceName string     `gorm:"column:place_name"`
+	StartsAt  time.Time  `gorm:"column:starts_at"`
+	EndsAt    *time.Time `gorm:"column:ends_at"`
+	IsFree    *bool      `gorm:"column:is_free"`
+	ImageURL  string     `gorm:"column:image_url"`
+	SourceURL string     `gorm:"column:source_url"`
+	DistanceM *float64   `gorm:"column:distance_m;->"`
+}
+
+func (spotRow) TableName() string { return "spots" }
+
+// spotColumns selects every spotRow column; lat/lng come from the geography point.
+const spotColumns = "id, source, source_id, title, summary, category, " +
+	"ST_Y(geog::geometry) AS lat, ST_X(geog::geometry) AS lng, " +
+	"address, place_name, starts_at, ends_at, is_free, image_url, source_url"
 
 // Store implements store.SpotStore on PostgreSQL + PostGIS.
 type Store struct {
-	q *sqlcdb.Queries
+	db *gorm.DB
 }
 
 var _ store.SpotStore = (*Store)(nil)
 
-// New wraps a pgx pool (or any sqlcdb.DBTX).
-func New(db sqlcdb.DBTX) *Store { return &Store{q: sqlcdb.New(db)} }
+// New wraps an existing *gorm.DB.
+func New(db *gorm.DB) *Store { return &Store{db: db} }
 
-// Open connects to databaseURL and returns the store and the pool (caller closes it).
-func Open(ctx context.Context, databaseURL string) (*Store, *pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+// Open connects to databaseURL. Call Close when done.
+func Open(ctx context.Context, databaseURL string) (*Store, error) {
+	db, err := gorm.Open(pgdriver.Open(databaseURL), &gorm.Config{Logger: logger.Discard, SkipDefaultTransaction: true})
 	if err != nil {
-		return nil, nil, fmt.Errorf("postgres: connect: %w", err)
+		return nil, fmt.Errorf("postgres: connect: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, nil, fmt.Errorf("postgres: ping: %w", err)
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("postgres: connect: %w", err)
 	}
-	return New(pool), pool, nil
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("postgres: ping: %w", err)
+	}
+	return New(db), nil
+}
+
+// Close closes the underlying connection pool.
+func (s *Store) Close() error {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+// point is a geography point expression (PostGIS takes lng, lat order).
+func point(lat, lng float64) clause.Expr {
+	return gorm.Expr("ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography", lng, lat)
+}
+
+// listFilter holds the conditions shared by list queries (see store.NearbyQuery doc).
+type listFilter struct {
+	Categories    []domain.Category
+	FreeOnly      bool
+	From, To, Now time.Time
+}
+
+// filter applies the shared list conditions.
+func filter(f listFilter) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if len(f.Categories) > 0 {
+			cats := make([]string, 0, len(f.Categories))
+			for _, c := range f.Categories {
+				cats = append(cats, string(c))
+			}
+			db = db.Where("category IN ?", cats)
+		}
+		if f.FreeOnly {
+			db = db.Where("is_free IS TRUE")
+		}
+		return db.
+			Where("(ends_at IS NULL OR ends_at >= ?)", f.Now). // 끝난 행사 숨김
+			Where("starts_at <= ?", f.To).
+			Where("COALESCE(ends_at, starts_at) >= ?", f.From)
+	}
 }
 
 // NearbySpots implements store.SpotReader.
 func (s *Store) NearbySpots(ctx context.Context, q store.NearbyQuery) ([]domain.Spot, error) {
-	cats := make([]string, 0, len(q.Categories)) // non-nil: NULL would match nothing
-	for _, c := range q.Categories {
-		cats = append(cats, string(c))
+	pt := point(q.Lat, q.Lng)
+	tx := s.db.WithContext(ctx).Model(&spotRow{}).
+		Select(spotColumns+", ST_Distance(geog, ?) AS distance_m", pt).
+		Where("ST_DWithin(geog, ?, ?)", pt, float64(q.RadiusM)).
+		Scopes(filter(listFilter{q.Categories, q.FreeOnly, q.From, q.To, q.Now})).
+		Order("distance_m, id").
+		Offset(q.Offset)
+	if q.Limit > 0 {
+		tx = tx.Limit(q.Limit)
 	}
-	limit := q.Limit
-	if limit <= 0 {
-		limit = math.MaxInt32
-	}
-	rows, err := s.q.NearbySpots(ctx, sqlcdb.NearbySpotsParams{
-		Lat: q.Lat, Lng: q.Lng, RadiusM: float64(q.RadiusM),
-		Categories: cats, FreeOnly: q.FreeOnly,
-		Now: ts(q.Now), WindowFrom: ts(q.From), WindowTo: ts(q.To),
-		RowOffset: int32(q.Offset), RowLimit: int32(limit),
-	})
-	if err != nil {
+	var rows []spotRow
+	if err := tx.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("postgres: nearby spots: %w", err)
 	}
 	out := make([]domain.Spot, 0, len(rows))
 	for _, r := range rows {
-		d := int(math.Round(r.DistanceM))
-		sp := toSpot(sqlcdb.GetSpotRow{
-			ID: r.ID, Source: r.Source, SourceID: r.SourceID, Title: r.Title, Summary: r.Summary,
-			Category: r.Category, Lat: r.Lat, Lng: r.Lng, Address: r.Address, PlaceName: r.PlaceName,
-			StartsAt: r.StartsAt, EndsAt: r.EndsAt, IsFree: r.IsFree, ImageUrl: r.ImageUrl, SourceUrl: r.SourceUrl,
-		})
-		sp.DistanceM = &d
-		out = append(out, sp)
+		out = append(out, r.toDomain())
 	}
 	return out, nil
 }
 
 // SpotByID implements store.SpotReader.
 func (s *Store) SpotByID(ctx context.Context, id string, now time.Time) (domain.Spot, error) {
-	r, err := s.q.GetSpot(ctx, sqlcdb.GetSpotParams{ID: id, Now: ts(now)})
-	if errors.Is(err, pgx.ErrNoRows) {
+	var r spotRow
+	err := s.db.WithContext(ctx).Model(&spotRow{}).
+		Select(spotColumns).
+		Where("id = ?", id).
+		Where("(ends_at IS NULL OR ends_at >= ?)", now).
+		Take(&r).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.Spot{}, store.ErrNotFound
 	}
 	if err != nil {
 		return domain.Spot{}, fmt.Errorf("postgres: get spot: %w", err)
 	}
-	return toSpot(r), nil
+	return r.toDomain(), nil
+}
+
+// upsertColumns are overwritten when (source, source_id) already exists.
+var upsertColumns = []string{
+	"title", "summary", "category", "geog", "address", "place_name",
+	"starts_at", "ends_at", "is_free", "image_url", "source_url",
 }
 
 // UpsertSpot implements store.SpotWriter.
 func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
-	p := sqlcdb.UpsertSpotParams{
-		ID: sp.ID, Source: sp.Source, SourceID: sp.SourceID, Title: sp.Title, Summary: sp.Summary,
-		Category: string(sp.Category), Lat: sp.Lat, Lng: sp.Lng, Address: sp.Address, PlaceName: sp.PlaceName,
-		StartsAt: ts(sp.StartsAt), ImageUrl: sp.ImageURL, SourceUrl: sp.SourceURL,
+	values := map[string]any{
+		"id": sp.ID, "source": sp.Source, "source_id": sp.SourceID,
+		"title": sp.Title, "summary": sp.Summary, "category": string(sp.Category),
+		"geog":    point(sp.Lat, sp.Lng),
+		"address": sp.Address, "place_name": sp.PlaceName,
+		"starts_at": sp.StartsAt, "ends_at": sp.EndsAt, "is_free": sp.IsFree,
+		"image_url": sp.ImageURL, "source_url": sp.SourceURL,
 	}
-	if sp.EndsAt != nil {
-		p.EndsAt = ts(*sp.EndsAt)
-	}
-	if sp.IsFree != nil {
-		p.IsFree = pgtype.Bool{Bool: *sp.IsFree, Valid: true}
-	}
-	if err := s.q.UpsertSpot(ctx, p); err != nil {
+	err := s.db.WithContext(ctx).Model(&spotRow{}).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "source"}, {Name: "source_id"}},
+			DoUpdates: append(clause.AssignmentColumns(upsertColumns),
+				clause.Assignment{Column: clause.Column{Name: "updated_at"}, Value: gorm.Expr("now()")}),
+		}).
+		Create(values).Error
+	if err != nil {
 		return fmt.Errorf("postgres: upsert spot %s: %w", sp.ID, err)
 	}
 	return nil
 }
 
-func ts(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
-
-func toSpot(r sqlcdb.GetSpotRow) domain.Spot {
+func (r spotRow) toDomain() domain.Spot {
 	sp := domain.Spot{
 		ID: r.ID, Source: r.Source, SourceID: r.SourceID, Title: r.Title, Summary: r.Summary,
 		Category: domain.Category(r.Category), Lat: r.Lat, Lng: r.Lng, Address: r.Address,
-		PlaceName: r.PlaceName, StartsAt: r.StartsAt.Time, ImageURL: r.ImageUrl, SourceURL: r.SourceUrl,
+		PlaceName: r.PlaceName, StartsAt: r.StartsAt, EndsAt: r.EndsAt, IsFree: r.IsFree,
+		ImageURL: r.ImageURL, SourceURL: r.SourceURL,
 	}
-	if r.EndsAt.Valid {
-		t := r.EndsAt.Time
-		sp.EndsAt = &t
-	}
-	if r.IsFree.Valid {
-		b := r.IsFree.Bool
-		sp.IsFree = &b
+	if r.DistanceM != nil {
+		d := int(math.Round(*r.DistanceM))
+		sp.DistanceM = &d
 	}
 	return sp
 }

@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.0 (2026-11-20) |
+| 버전 | v1.1 (2026-11-20) |
 | 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.0, [DATA-PLAN.md](DATA-PLAN.md) |
 | 출시 목표 | 2027년 3월 말, 서울, iOS · Android 동시 |
 
@@ -29,7 +29,7 @@
 
 | 레포 | 스택 | 비고 |
 |---|---|---|
-| `herezi-api` | Go 1.25, 표준 `net/http`, pgx v5, sqlc, goose, PostGIS | `cmd/api`, `cmd/ingest` 두 실행 파일 |
+| `herezi-api` | Go 1.25, 표준 `net/http`, GORM(pgx 드라이버), goose, PostGIS | `cmd/api`, `cmd/ingest` 두 실행 파일 |
 | `herezi-ios` | Swift 6, SwiftUI, iOS 17+, XcodeGen, 네이버 지도 SDK(SPM) | `.xcodeproj`는 생성물, 커밋 안 함 |
 | `herezi-android` | Kotlin, Jetpack Compose, 멀티모듈, Hilt, Retrofit + kotlinx.serialization, 네이버 지도 SDK | minSdk 26 |
 
@@ -38,7 +38,7 @@
 |---|---|
 | Go 표준 라이브러리 위주 | 엔드포인트가 적고 단순. 의존성 최소화가 에이전트 개발에 유리 |
 | PostGIS `geography` + GiST 인덱스 | 반경 검색·거리순 정렬을 DB에서 정확하게 처리 |
-| sqlc | SQL을 그대로 쓰고 타입 안전한 Go 코드 생성 |
+| GORM | 사용자 결정(2026-11-20). PostGIS 공간 쿼리는 GORM raw 표현식으로 작성, 스키마는 goose SQL 마이그레이션이 기준 |
 | 네이버 지도 (양 앱) | 국내 지도 품질, 길찾기를 네이버지도 앱으로 연결(기획 P0) |
 | 지오코딩: 네이버 클라우드 Geocoding | 좌표 없는 소스 항목 보완. 실패 시 GPT로 주소 정리 후 재시도 |
 | LLM: OpenAI GPT | 요약·카테고리 분류·무료 여부 추출. 결과는 DB에 캐시, 원문 해시가 같으면 재호출 안 함 |
@@ -113,3 +113,4 @@
 | 날짜 | 버전 | 내용 |
 |---|---|---|
 | 2026-11-20 | v1.0 | 작성 및 승인 |
+| 2026-11-20 | v1.1 | DB 접근을 sqlc → GORM으로 변경 ([ADR 0002](../adr/0002-gorm.md)) |

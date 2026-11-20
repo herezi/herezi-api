@@ -27,11 +27,11 @@ func TestStore(t *testing.T) {
 	ctx := context.Background()
 	storetest.Run(t, func(t *testing.T) store.SpotStore {
 		resetSchema(t, url)
-		s, pool, err := postgres.Open(ctx, url)
+		s, err := postgres.Open(ctx, url)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(pool.Close)
+		t.Cleanup(func() { _ = s.Close() })
 		return s
 	})
 }

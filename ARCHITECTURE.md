@@ -41,7 +41,9 @@
 
 ## 데이터베이스
 - PostgreSQL + PostGIS. 스키마는 `migrations/`(goose, `migrations.FS`로 embed).
-- SQL은 `internal/store/postgres/queries.sql`에만 쓰고, `sqlc generate`로 `sqlcdb/`를 만든다.
+- DB 접근은 GORM(pgx 드라이버). 모델(`spotRow`)은 `internal/store/postgres` 안에만 두고 `domain.Spot`과 변환한다. `domain`은 gorm을 import하지 않는다.
+- 스키마의 기준은 goose 마이그레이션이다. `AutoMigrate`는 쓰지 않는다(geography 컬럼·GiST 인덱스를 표현할 수 없음).
+- 공간 조건(`ST_DWithin`, `ST_Distance`, `ST_MakePoint` 등)은 GORM raw 표현식(`Where`, `Select`, `gorm.Expr`)으로 쓴다. 사용자 입력은 항상 `?` 바인딩으로 넘긴다.
 
 ## 앞으로 들어올 것
 - `cmd/ingest` 아래 수집 파이프라인(수집기 → 정규화 → 지오코딩 → GPT 보강 → 중복 제거). 수집기와 정규화는 `domain.RawItem`으로만 연결해 서로 의존하지 않게 한다. httpapi는 ingest 쪽을 import하지 않는다.

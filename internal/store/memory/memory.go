@@ -49,7 +49,7 @@ func (s *Store) SpotByID(_ context.Context, id string, now time.Time) (domain.Sp
 	return sp, nil
 }
 
-// NearbySpots mirrors the PostGIS query semantics (see store/postgres/queries.sql).
+// NearbySpots mirrors the PostGIS query semantics (see store/postgres).
 func (s *Store) NearbySpots(_ context.Context, q store.NearbyQuery) ([]domain.Spot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
