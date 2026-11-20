@@ -16,7 +16,7 @@ import (
 // ErrNotFound is returned by SpotByID when no spot exists.
 var ErrNotFound = errors.New("store: not found")
 
-// SpotFilter is shared by list queries.
+// SpotFilter is shared by list queries (목록·지도). 상세(SpotByID)에는 적용하지 않는다.
 //
 // 구현체는 반드시 다음을 지킨다:
 //   - ends_at < Now 인 항목은 반환하지 않는다 (끝난 행사 숨김).
@@ -63,9 +63,9 @@ type BBoxQuery struct {
 type SpotReader interface {
 	NearbySpots(ctx context.Context, q NearbyQuery) ([]domain.Spot, error)
 	SpotsInBBox(ctx context.Context, q BBoxQuery) ([]domain.Spot, error)
-	// SpotByID returns ErrNotFound when the spot does not exist or has ended
-	// (ends_at < now).
-	SpotByID(ctx context.Context, id string, now time.Time) (domain.Spot, error)
+	// SpotByID returns ErrNotFound when the spot does not exist.
+	// 끝난 행사(ends_at < now)도 반환한다 — 상세는 is_ended로 표시한다(TECH-PLAN.md §3).
+	SpotByID(ctx context.Context, id string) (domain.Spot, error)
 }
 
 // SpotWriter is what the ingest pipeline needs.

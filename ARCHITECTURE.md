@@ -34,6 +34,10 @@
    - postgres: `geography` + `ST_DWithin`/`ST_Distance` (GiST 인덱스).
 4. `limit+1`개를 받아 다음 페이지 유무를 판단하고, 불투명 커서(`next_cursor`)를 돌려준다.
 
+`GET /v1/spots/map`도 같은 필터(끝난 행사 제외)를 쓴다. 반면 **상세 `GET /v1/spots/{id}`는 끝난 행사도 반환한다**:
+저장소 `SpotByID`는 시각 조건 없이 ID로만 찾고(없으면 `ErrNotFound` → 404), 핸들러가 요청 시계(`s.now()`)로
+`is_ended`(= `domain.Spot.Ended(now)`)를 계산해 붙인다. 목록·지도 응답의 `is_ended`는 항상 `false`다.
+
 ## 계약과 테스트
 - `api/openapi.yaml`이 단일 기준. `internal/httpapi/contract_test.go`가 카테고리 enum, `when` enum, 라우트 목록, 응답 JSON 필드를 대조한다.
 - `internal/store/storetest`: 저장소 공통 스위트. 메모리는 `go test`, postgres는 `-tags integration`(CI의 PostGIS 서비스 컨테이너)에서 같은 스위트를 돈다.

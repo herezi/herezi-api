@@ -30,6 +30,7 @@ type openAPI struct {
 	Components struct {
 		Schemas map[string]struct {
 			Enum       []string       `yaml:"enum"`
+			Required   []string       `yaml:"required"`
 			Properties map[string]any `yaml:"properties"`
 		} `yaml:"schemas"`
 	} `yaml:"components"`
@@ -124,6 +125,32 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 		sort.Strings(want)
 		if !slices.Equal(got, want) {
 			t.Errorf("%s: json fields %v, openapi properties %v", name, got, want)
+		}
+	}
+}
+
+// TestRequiredFieldsMatchOpenAPI: openapi required 필드는 JSON에서 생략되면 안 되고(omitempty 금지),
+// omitempty가 아닌 필드는 required여야 한다.
+func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
+	doc := loadOpenAPI(t)
+	for name, typ := range map[string]reflect.Type{
+		"Spot":     reflect.TypeFor[spotJSON](),
+		"SpotPage": reflect.TypeFor[spotPageJSON](),
+		"SpotMap":  reflect.TypeFor[spotMapJSON](),
+		"Error":    reflect.TypeFor[errorBody](),
+	} {
+		var got []string
+		for i := range typ.NumField() {
+			tag := typ.Field(i).Tag.Get("json")
+			if !strings.Contains(tag, ",omitempty") {
+				got = append(got, strings.Split(tag, ",")[0])
+			}
+		}
+		want := slices.Clone(doc.Components.Schemas[name].Required)
+		sort.Strings(got)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: always-present json fields %v, openapi required %v", name, got, want)
 		}
 	}
 }

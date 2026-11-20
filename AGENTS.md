@@ -52,7 +52,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 4. **`api/openapi.yaml`이 계약의 단일 기준.** 엔드포인트·필드·enum을 바꾸면 openapi를 먼저(같은 PR에서) 고친다. 계약 테스트(`internal/httpapi/contract_test.go`)가 카테고리 enum·라우트·JSON 필드를 대조한다. 하위호환을 지킨다(필드 삭제·의미 변경 금지, 추가는 가능).
 5. **큰 결정은 ADR로.** 스택·저장소·외부 서비스·계층 규칙을 바꾸는 결정은 `docs/adr/NNNN-제목.md`로 남기고 TECH-PLAN.md도 함께 고친다.
 6. **계층 규칙을 지킨다.** [ARCHITECTURE.md](ARCHITECTURE.md) 참고. `domain`은 아무것도 import하지 않고, `cmd`만 구체 구현을 조립한다.
-7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 어떤 응답에도 넣지 않는다. 무료는 카테고리가 아니라 `free=true` 필터다.
+7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 목록(`/v1/spots`)·지도(`/v1/spots/map`)에 넣지 않는다. 상세(`/v1/spots/{id}`)는 끝난 행사도 200으로 돌려주고 `is_ended: true`를 붙인다(요청 시각 기준 계산). 무료는 카테고리가 아니라 `free=true` 필터다.
 8. **DB 접근은 GORM, 스키마는 goose 마이그레이션.** 테이블·컬럼·인덱스는 `migrations/`에 새 SQL 파일로만 바꾼다. **`AutoMigrate` 금지**(PostGIS geography·GiST 인덱스를 표현할 수 없다). GORM 모델은 `internal/store/postgres` 안에만 두고 `domain`은 gorm을 import하지 않는다. 공간 조건은 raw 표현식에 `?` 바인딩으로. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
 9. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Secret Manager).
 10. 문서·주석은 한국어, 코드 식별자는 영어.

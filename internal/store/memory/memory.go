@@ -43,12 +43,12 @@ func (s *Store) UpsertSpot(_ context.Context, sp domain.Spot) error {
 	return nil
 }
 
-// SpotByID returns store.ErrNotFound when missing or ended.
-func (s *Store) SpotByID(_ context.Context, id string, now time.Time) (domain.Spot, error) {
+// SpotByID returns store.ErrNotFound when missing. Ended spots are returned.
+func (s *Store) SpotByID(_ context.Context, id string) (domain.Spot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sp, ok := s.spots[id]
-	if !ok || sp.Ended(now) {
+	if !ok {
 		return domain.Spot{}, store.ErrNotFound
 	}
 	return sp, nil

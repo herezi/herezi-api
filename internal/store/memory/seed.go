@@ -31,7 +31,7 @@ func SeedSeoul(now time.Time) []domain.Spot {
 			37.5446, 127.0557, "성수동", now.Add(-1*day), ptr(now.Add(3*day)), &yes),
 		mk("5", "광화문 버스킹", "광화문광장 무료 공연 예시.", domain.CategoryPerformance,
 			37.5720, 126.9769, "광화문광장", now.Add(2*day), ptr(now.Add(2*day+3*time.Hour)), &yes),
-		mk("6", "지난 전시 (끝남)", "끝난 행사는 노출되지 않아야 한다.", domain.CategoryExhibition,
+		mk("6", "지난 전시 (끝남)", "끝난 행사는 목록·지도에 안 나오고 상세에서만 종료됨으로 보인다.", domain.CategoryExhibition,
 			37.5700, 126.9830, "인사동", now.Add(-20*day), ptr(now.Add(-1*day)), &no),
 	}
 }

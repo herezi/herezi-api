@@ -105,7 +105,8 @@ func (s Spot) Overlaps(from, to time.Time) bool {
 }
 
 // Ended reports whether the spot has an explicit end time before now.
-// 끝난 행사(ends_at < now)는 어떤 조회에서도 반환하지 않는다 (TECH-PLAN.md §3).
+// 끝난 행사(ends_at < now)는 목록·지도에서 숨기고, 상세에서는 is_ended=true로 반환한다 (TECH-PLAN.md §3).
+// 날짜만 있는 종료일은 수집 시 그날 23:59:59 KST로 저장되므로 여기선 시각 비교만 한다 (DATA-PLAN.md Q1).
 func (s Spot) Ended(now time.Time) bool {
 	return s.EndsAt != nil && s.EndsAt.Before(now)
 }

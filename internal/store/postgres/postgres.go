@@ -159,13 +159,12 @@ func (s *Store) SpotsInBBox(ctx context.Context, q store.BBoxQuery) ([]domain.Sp
 	return out, nil
 }
 
-// SpotByID implements store.SpotReader.
-func (s *Store) SpotByID(ctx context.Context, id string, now time.Time) (domain.Spot, error) {
+// SpotByID implements store.SpotReader. 끝난 행사도 반환한다(is_ended는 핸들러가 계산).
+func (s *Store) SpotByID(ctx context.Context, id string) (domain.Spot, error) {
 	var r spotRow
 	err := s.db.WithContext(ctx).Model(&spotRow{}).
 		Select(spotColumns).
 		Where("id = ?", id).
-		Where("(ends_at IS NULL OR ends_at >= ?)", now).
 		Take(&r).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.Spot{}, store.ErrNotFound
