@@ -13,7 +13,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit
    - **herezi-api**: `make check`, `make run` 후 `curl`로 `/v1/spots` 등 호출 → 응답을 openapi와 대조(필드·타입·오류 형식), 끝난 행사가 안 나오는지, 반경·필터·정렬.
    - **herezi-ios**: `make check`, 시뮬레이터 실행(`xcrun simctl`), 화면 캡처(`xcrun simctl io booted screenshot <path>`)로 상태별 화면 확인. 다크 모드·큰 글씨도 1회.
    - **herezi-android**: `make check`(`testDebugUnitTest`), 에뮬레이터가 있으면 `adb exec-out screencap -p`. 에뮬레이터 이미지는 새로 받지 않는다(디스크 제한).
-   - 디자인 스펙(`docs/design/`)이 있으면 스크린샷과 비교.
+   - 디자인 스펙(`herezi-api/docs/design/`)이 있으면 스크린샷과 비교.
 4. 빌드 산출물·DerivedData는 스크래치 폴더에 두고 끝나면 지운다.
 
 ## 버그 등록

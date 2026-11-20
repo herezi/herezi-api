@@ -17,6 +17,7 @@ Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
 | [docs/product/DATA-PLAN.md](docs/product/DATA-PLAN.md) | 데이터 기획: 소스·수집·정규화 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 패키지 계층과 의존 규칙 |
 | [docs/adr/](docs/adr/) | 아키텍처 결정 기록(ADR) |
+| [docs/design/DESIGN.md](docs/design/DESIGN.md) | 디자인 시스템·화면 스펙 (iOS·Android 공통) |
 | [api/openapi.yaml](api/openapi.yaml) | API 계약 |
 
 ## 폴더 구조
@@ -32,6 +33,7 @@ internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테�
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
 migrations/                 goose SQL 마이그레이션 (embed)
 docs/product/               기획 문서
+docs/design/                디자인 시스템·화면 스펙·목업 (두 앱 공통)
 docs/adr/                   ADR (NNNN-제목.md)
 ```
 
