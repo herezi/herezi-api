@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -84,5 +85,18 @@ func TestNaverReverseTimeout(t *testing.T) {
 	n.HTTP.Timeout = 50 * time.Millisecond
 	if _, err := n.Reverse(context.Background(), 37.5, 127.0); err == nil {
 		t.Fatal("want timeout error")
+	}
+}
+
+// 에러 메시지에 요청 URL(좌표)이 들어가면 안 된다(로그 규칙).
+func TestNaverReverseErrorHasNoCoordinates(t *testing.T) {
+	n := fakeNaver(t, http.StatusOK, naverOK, func(*http.Request) { time.Sleep(200 * time.Millisecond) })
+	n.HTTP.Timeout = 50 * time.Millisecond
+	_, err := n.Reverse(context.Background(), 37.566312, 126.977945)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if msg := err.Error(); strings.Contains(msg, "37.566") || strings.Contains(msg, "126.977") || strings.Contains(msg, "coords") {
+		t.Fatalf("error leaks coordinates: %s", msg)
 	}
 }
