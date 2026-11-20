@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 400 300"><title>family 대체 일러스트</title><rect width="400" height="300" fill="#5E9414"/>
+<ellipse cx="200" cy="246" rx="120" ry="14" fill="#FFFFFF" fill-opacity="0.2"/>
+<path d="M152 112 Q 160 150 168 172 M200 92 Q 196 140 186 170 M248 116 Q 236 150 222 176" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-opacity="0.8"/>
+<ellipse cx="150" cy="86" rx="22" ry="27" fill="#FFFFFF" fill-opacity="0.7"/>
+<ellipse cx="200" cy="66" rx="24" ry="29" fill="#FFFFFF"/>
+<ellipse cx="250" cy="90" rx="21" ry="26" fill="#FFFFFF" fill-opacity="0.5"/>
+<circle cx="170" cy="150" r="17" fill="#FFFFFF"/>
+<rect x="152" y="172" width="36" height="74" rx="18" fill="#FFFFFF"/>
+<circle cx="236" cy="176" r="13" fill="#FFFFFF"/>
+<rect x="222" y="194" width="28" height="52" rx="14" fill="#FFFFFF"/>
+<path d="M186 196 Q 206 210 224 204" stroke="#FFFFFF" stroke-width="8" fill="none" stroke-linecap="round"/></svg>
