@@ -1,0 +1,217 @@
+package httpapi_test
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/herezi/herezi-api/internal/httpapi"
+	"github.com/herezi/herezi-api/internal/store/memory"
+	"github.com/herezi/herezi-api/internal/store/storetest"
+)
+
+type spot struct {
+	ID        string `json:"id"`
+	Category  string `json:"category"`
+	IsFree    *bool  `json:"is_free"`
+	DistanceM *int   `json:"distance_m"`
+}
+
+type page struct {
+	Items      []spot `json:"items"`
+	NextCursor string `json:"next_cursor"`
+}
+
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func newServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	st := memory.New(storetest.Fixtures()...)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := httpapi.New(st, log, httpapi.WithClock(func() time.Time { return storetest.Now })).Handler()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func get(t *testing.T, srv *httptest.Server, path string, params url.Values, out any) *http.Response {
+	t.Helper()
+	u := srv.URL + path
+	if len(params) > 0 {
+		u += "?" + params.Encode()
+	}
+	res, err := http.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("%s: content-type %q", u, ct)
+	}
+	if out != nil {
+		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+			t.Fatalf("%s: decode: %v", u, err)
+		}
+	}
+	return res
+}
+
+// near is the base query: Seoul City Hall, where the storetest fixtures are.
+func near(kv ...string) url.Values {
+	v := url.Values{"lat": {"37.5663"}, "lng": {"126.9779"}}
+	for i := 0; i+1 < len(kv); i += 2 {
+		v.Set(kv[i], kv[i+1])
+	}
+	return v
+}
+
+func ids(p page) []string {
+	out := []string{}
+	for _, it := range p.Items {
+		out = append(out, strings.TrimPrefix(it.ID, "test:"))
+	}
+	return out
+}
+
+func TestHealthz(t *testing.T) {
+	srv := newServer(t)
+	var body map[string]string
+	res := get(t, srv, "/healthz", nil, &body)
+	if res.StatusCode != http.StatusOK || body["status"] != "ok" {
+		t.Fatalf("got %d %v", res.StatusCode, body)
+	}
+}
+
+func TestListSpotsFilters(t *testing.T) {
+	srv := newServer(t)
+	cases := []struct {
+		name   string
+		params url.Values
+		want   []string
+	}{
+		{"default now, by distance, ended hidden", near(),
+			[]string{"near-festival-free", "mid-popup", "far-exhibition-unknown"}},
+		{"radius", near("radius_m", "1500"), []string{"near-festival-free", "mid-popup"}},
+		{"category list", near("category", "popup, exhibition"), []string{"mid-popup", "far-exhibition-unknown"}},
+		{"when=week includes upcoming", near("when", "week"),
+			[]string{"near-festival-free", "tomorrow", "mid-popup", "far-exhibition-unknown"}},
+		{"when=today excludes tomorrow", near("when", "today"),
+			[]string{"near-festival-free", "mid-popup", "far-exhibition-unknown"}},
+		{"free=true", near("free", "true"), []string{"near-festival-free"}},
+		{"free=true with week", near("free", "true", "when", "week"), []string{"near-festival-free", "tomorrow"}},
+		{"free=false is no filter", near("free", "false"),
+			[]string{"near-festival-free", "mid-popup", "far-exhibition-unknown"}},
+		{"far away is empty", url.Values{"lat": {"35.1796"}, "lng": {"129.0756"}}, []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var p page
+			res := get(t, srv, "/v1/spots", tc.params, &p)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("status %d", res.StatusCode)
+			}
+			if p.Items == nil {
+				t.Fatal("items must be [] not null")
+			}
+			if got := ids(p); !slices.Equal(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for _, it := range p.Items {
+				if it.DistanceM == nil {
+					t.Errorf("%s: distance_m missing", it.ID)
+				}
+				if it.ID == "test:ended" {
+					t.Error("ended spot returned")
+				}
+			}
+			if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=60") {
+				t.Errorf("Cache-Control = %q", cc)
+			}
+		})
+	}
+}
+
+func TestListSpotsPagination(t *testing.T) {
+	srv := newServer(t)
+	var all []string
+	params := near("limit", "2", "when", "week")
+	for range 5 {
+		var p page
+		if res := get(t, srv, "/v1/spots", params, &p); res.StatusCode != http.StatusOK {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		all = append(all, ids(p)...)
+		if p.NextCursor == "" {
+			break
+		}
+		params.Set("cursor", p.NextCursor)
+	}
+	want := []string{"near-festival-free", "tomorrow", "mid-popup", "far-exhibition-unknown"}
+	if !slices.Equal(all, want) {
+		t.Fatalf("got %v, want %v", all, want)
+	}
+}
+
+func TestGetSpot(t *testing.T) {
+	srv := newServer(t)
+	var s spot
+	res := get(t, srv, "/v1/spots/test:mid-popup", nil, &s)
+	if res.StatusCode != http.StatusOK || s.ID != "test:mid-popup" || s.Category != "popup" {
+		t.Fatalf("got %d %+v", res.StatusCode, s)
+	}
+	if s.DistanceM != nil {
+		t.Error("distance_m must be omitted on detail")
+	}
+	for _, id := range []string{"test:ended", "test:nope"} {
+		var e apiError
+		res := get(t, srv, "/v1/spots/"+id, nil, &e)
+		if res.StatusCode != http.StatusNotFound || e.Code != "not_found" || e.Message == "" {
+			t.Errorf("%s: got %d %+v", id, res.StatusCode, e)
+		}
+	}
+}
+
+func TestListSpotsBadParams(t *testing.T) {
+	srv := newServer(t)
+	cases := map[string]url.Values{
+		"missing lat":        {"lng": {"126.9779"}},
+		"missing lng":        {"lat": {"37.5663"}},
+		"lat not number":     near("lat", "abc"),
+		"lat out of range":   near("lat", "91"),
+		"lng out of range":   near("lng", "-181"),
+		"lat NaN":            near("lat", "NaN"),
+		"radius too small":   near("radius_m", "99"),
+		"radius too big":     near("radius_m", "20001"),
+		"radius not int":     near("radius_m", "1.5"),
+		"limit zero":         near("limit", "0"),
+		"limit too big":      near("limit", "101"),
+		"category unknown":   near("category", "festival,bogus"),
+		"category free gone": near("category", "free"),
+		"when unknown":       near("when", "yesterday"),
+		"free not bool":      near("free", "yes"),
+		"cursor garbage":     near("cursor", "!!!"),
+		"cursor negative":    near("cursor", "bzotMQ"), // base64("o:-1")
+	}
+	for name, params := range cases {
+		t.Run(name, func(t *testing.T) {
+			var e apiError
+			res := get(t, srv, "/v1/spots", params, &e)
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status %d", res.StatusCode)
+			}
+			if e.Code != "invalid_parameter" || e.Message == "" {
+				t.Fatalf("error body %+v", e)
+			}
+		})
+	}
+}
