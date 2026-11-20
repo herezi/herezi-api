@@ -63,10 +63,10 @@
 |---|---|---|
 | GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `cursor`, `limit` → 거리순 |
 | GET | `/v1/spots/{id}` | 상세 |
-| GET | `/v1/spots/map` | 지도 영역(bbox) 조회, 클러스터는 앱에서 처리 *(계약에 추가 예정)* |
-
-- `Spot`에 `fetched_at`(갱신 시각) 추가 예정 — 상세 화면 요구사항. 계약 변경은 M0 이슈에서.
+| GET | `/v1/spots/map` | 지도 영역(bbox: `sw_lat`, `sw_lng`, `ne_lat`, `ne_lng`) + `category`, `when`, `free`, 최대 `limit`(기본 200, 최대 500)개, 영역 중심에서 가까운 순. 넘치면 `truncated: true`. 클러스터는 앱에서 처리 |
 | GET | `/healthz` | 헬스체크 |
+
+- `Spot.fetched_at`(원본에서 가져온 시각, 필수) — 상세 화면의 "갱신 시각".
 
 - 인증 없음. 대신 앱별 API 키 헤더 + IP 기준 속도 제한.
 - 응답 캐시: `Cache-Control: max-age=60`.

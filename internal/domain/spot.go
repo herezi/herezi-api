@@ -4,6 +4,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -61,6 +62,11 @@ func ParseCategories(s string) ([]Category, error) {
 	return out, nil
 }
 
+// BBox is a map viewport given by its south-west and north-east corners.
+type BBox struct {
+	SwLat, SwLng, NeLat, NeLng float64
+}
+
 // Spot is one "thing to see/do" at a place and time.
 // ID is "<source>:<source_id>" so re-ingesting the same item upserts instead of duplicating.
 type Spot struct {
@@ -79,6 +85,8 @@ type Spot struct {
 	Source    string
 	SourceID  string
 	SourceURL string
+	// FetchedAt is when the item was last fetched from its source (앱의 "갱신 시각").
+	FetchedAt time.Time
 	// DistanceM is filled only by nearby queries.
 	DistanceM *int
 }
@@ -104,6 +112,37 @@ func (s Spot) Ended(now time.Time) bool {
 
 // Free reports whether the spot is known to be free. Unknown (nil) counts as not free.
 func (s Spot) Free() bool { return s.IsFree != nil && *s.IsFree }
+
+// Center returns the midpoint of the bbox (no antimeridian support).
+func (b BBox) Center() (lat, lng float64) {
+	return (b.SwLat + b.NeLat) / 2, (b.SwLng + b.NeLng) / 2
+}
+
+// Contains reports whether (lat, lng) is inside the bbox, edges included.
+func (b BBox) Contains(lat, lng float64) bool {
+	return lat >= b.SwLat && lat <= b.NeLat && lng >= b.SwLng && lng <= b.NeLng
+}
+
+// Validate checks ranges and that sw is south-west of ne.
+// 날짜변경선을 넘는 영역(SwLng > NeLng)은 지원하지 않는다.
+func (b BBox) Validate() error {
+	for _, v := range []struct {
+		name string
+		val  float64
+		max  float64
+	}{{"sw_lat", b.SwLat, 90}, {"ne_lat", b.NeLat, 90}, {"sw_lng", b.SwLng, 180}, {"ne_lng", b.NeLng, 180}} {
+		if math.IsNaN(v.val) || math.Abs(v.val) > v.max {
+			return fmt.Errorf("%s must be a number in [-%g, %g]", v.name, v.max, v.max)
+		}
+	}
+	if b.SwLat > b.NeLat {
+		return fmt.Errorf("sw_lat must be <= ne_lat")
+	}
+	if b.SwLng > b.NeLng {
+		return fmt.Errorf("sw_lng must be <= ne_lng (antimeridian-crossing bbox is not supported)")
+	}
+	return nil
+}
 
 // RawItem is an unnormalized record fetched by a collector. Collectors produce it,
 // the normalizer consumes it; it lives in domain so neither depends on the other.

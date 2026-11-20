@@ -38,6 +38,7 @@ type spotRow struct {
 	IsFree    *bool      `gorm:"column:is_free"`
 	ImageURL  string     `gorm:"column:image_url"`
 	SourceURL string     `gorm:"column:source_url"`
+	FetchedAt time.Time  `gorm:"column:fetched_at"`
 	DistanceM *float64   `gorm:"column:distance_m;->"`
 }
 
@@ -46,7 +47,7 @@ func (spotRow) TableName() string { return "spots" }
 // spotColumns selects every spotRow column; lat/lng come from the geography point.
 const spotColumns = "id, source, source_id, title, summary, category, " +
 	"ST_Y(geog::geometry) AS lat, ST_X(geog::geometry) AS lng, " +
-	"address, place_name, starts_at, ends_at, is_free, image_url, source_url"
+	"address, place_name, starts_at, ends_at, is_free, image_url, source_url, fetched_at"
 
 // Store implements store.SpotStore on PostgreSQL + PostGIS.
 type Store struct {
@@ -89,15 +90,8 @@ func point(lat, lng float64) clause.Expr {
 	return gorm.Expr("ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography", lng, lat)
 }
 
-// listFilter holds the conditions shared by list queries (see store.NearbyQuery doc).
-type listFilter struct {
-	Categories    []domain.Category
-	FreeOnly      bool
-	From, To, Now time.Time
-}
-
-// filter applies the shared list conditions.
-func filter(f listFilter) func(*gorm.DB) *gorm.DB {
+// filter applies store.SpotFilter (see its doc for the rules).
+func filter(f store.SpotFilter) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		if len(f.Categories) > 0 {
 			cats := make([]string, 0, len(f.Categories))
@@ -122,7 +116,7 @@ func (s *Store) NearbySpots(ctx context.Context, q store.NearbyQuery) ([]domain.
 	tx := s.db.WithContext(ctx).Model(&spotRow{}).
 		Select(spotColumns+", ST_Distance(geog, ?) AS distance_m", pt).
 		Where("ST_DWithin(geog, ?, ?)", pt, float64(q.RadiusM)).
-		Scopes(filter(listFilter{q.Categories, q.FreeOnly, q.From, q.To, q.Now})).
+		Scopes(filter(q.SpotFilter)).
 		Order("distance_m, id").
 		Offset(q.Offset)
 	if q.Limit > 0 {
@@ -131,6 +125,32 @@ func (s *Store) NearbySpots(ctx context.Context, q store.NearbyQuery) ([]domain.
 	var rows []spotRow
 	if err := tx.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("postgres: nearby spots: %w", err)
+	}
+	out := make([]domain.Spot, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toDomain())
+	}
+	return out, nil
+}
+
+// SpotsInBBox implements store.SpotReader. 점 데이터라 평면 bbox 겹침(geometry &&)이
+// 정확하고, migrations/00002의 (geog::geometry) GiST 인덱스를 탄다.
+func (s *Store) SpotsInBBox(ctx context.Context, q store.BBoxQuery) ([]domain.Spot, error) {
+	cLat, cLng := q.Center()
+	tx := s.db.WithContext(ctx).Model(&spotRow{}).
+		Select(spotColumns).
+		Where("geog::geometry && ST_MakeEnvelope(?, ?, ?, ?, 4326)", q.SwLng, q.SwLat, q.NeLng, q.NeLat).
+		Scopes(filter(q.SpotFilter)).
+		Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:  "ST_Distance(geog, ?), id",
+			Vars: []any{point(cLat, cLng)},
+		}})
+	if q.Limit > 0 {
+		tx = tx.Limit(q.Limit)
+	}
+	var rows []spotRow
+	if err := tx.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("postgres: spots in bbox: %w", err)
 	}
 	out := make([]domain.Spot, 0, len(rows))
 	for _, r := range rows {
@@ -159,18 +179,21 @@ func (s *Store) SpotByID(ctx context.Context, id string, now time.Time) (domain.
 // upsertColumns are overwritten when (source, source_id) already exists.
 var upsertColumns = []string{
 	"title", "summary", "category", "geog", "address", "place_name",
-	"starts_at", "ends_at", "is_free", "image_url", "source_url",
+	"starts_at", "ends_at", "is_free", "image_url", "source_url", "fetched_at",
 }
 
-// UpsertSpot implements store.SpotWriter.
+// UpsertSpot implements store.SpotWriter. A zero FetchedAt becomes now.
 func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
+	if sp.FetchedAt.IsZero() {
+		sp.FetchedAt = time.Now()
+	}
 	values := map[string]any{
 		"id": sp.ID, "source": sp.Source, "source_id": sp.SourceID,
 		"title": sp.Title, "summary": sp.Summary, "category": string(sp.Category),
 		"geog":    point(sp.Lat, sp.Lng),
 		"address": sp.Address, "place_name": sp.PlaceName,
 		"starts_at": sp.StartsAt, "ends_at": sp.EndsAt, "is_free": sp.IsFree,
-		"image_url": sp.ImageURL, "source_url": sp.SourceURL,
+		"image_url": sp.ImageURL, "source_url": sp.SourceURL, "fetched_at": sp.FetchedAt,
 	}
 	err := s.db.WithContext(ctx).Model(&spotRow{}).
 		Clauses(clause.OnConflict{
@@ -190,7 +213,7 @@ func (r spotRow) toDomain() domain.Spot {
 		ID: r.ID, Source: r.Source, SourceID: r.SourceID, Title: r.Title, Summary: r.Summary,
 		Category: domain.Category(r.Category), Lat: r.Lat, Lng: r.Lng, Address: r.Address,
 		PlaceName: r.PlaceName, StartsAt: r.StartsAt, EndsAt: r.EndsAt, IsFree: r.IsFree,
-		ImageURL: r.ImageURL, SourceURL: r.SourceURL,
+		ImageURL: r.ImageURL, SourceURL: r.SourceURL, FetchedAt: r.FetchedAt,
 	}
 	if r.DistanceM != nil {
 		d := int(math.Round(*r.DistanceM))
