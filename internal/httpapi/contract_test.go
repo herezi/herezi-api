@@ -20,7 +20,10 @@ type openAPI struct {
 		Parameters []struct {
 			Name   string `yaml:"name"`
 			Schema struct {
-				Enum []string `yaml:"enum"`
+				Enum    []string `yaml:"enum"`
+				Default any      `yaml:"default"`
+				Minimum *float64 `yaml:"minimum"`
+				Maximum *float64 `yaml:"maximum"`
 			} `yaml:"schema"`
 		} `yaml:"parameters"`
 	} `yaml:"paths"`
@@ -107,6 +110,7 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 	for name, typ := range map[string]reflect.Type{
 		"Spot":     reflect.TypeFor[spotJSON](),
 		"SpotPage": reflect.TypeFor[spotPageJSON](),
+		"SpotMap":  reflect.TypeFor[spotMapJSON](),
 		"Error":    reflect.TypeFor[errorBody](),
 	} {
 		var got, want []string
@@ -120,6 +124,45 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 		sort.Strings(want)
 		if !slices.Equal(got, want) {
 			t.Errorf("%s: json fields %v, openapi properties %v", name, got, want)
+		}
+	}
+}
+
+// TestQueryParamsMatchOpenAPI checks parameter names and the integer limits the handlers enforce.
+func TestQueryParamsMatchOpenAPI(t *testing.T) {
+	doc := loadOpenAPI(t)
+	type lim struct{ def, lo, hi int }
+	for path, want := range map[string]struct {
+		names  []string
+		limits map[string]lim
+	}{
+		"/v1/spots": {
+			names: []string{"category", "cursor", "free", "lat", "limit", "lng", "radius_m", "when"},
+			limits: map[string]lim{
+				"radius_m": {defaultRadiusM, minRadiusM, maxRadiusM},
+				"limit":    {defaultLimit, 1, maxLimit},
+			},
+		},
+		"/v1/spots/map": {
+			names:  []string{"category", "free", "limit", "ne_lat", "ne_lng", "sw_lat", "sw_lng", "when"},
+			limits: map[string]lim{"limit": {defaultMapLimit, 1, maxMapLimit}},
+		},
+	} {
+		var names []string
+		for _, p := range doc.Paths[path]["get"].Parameters {
+			names = append(names, p.Name)
+			l, ok := want.limits[p.Name]
+			if !ok {
+				continue
+			}
+			sc := p.Schema
+			if sc.Minimum == nil || sc.Maximum == nil || int(*sc.Minimum) != l.lo || int(*sc.Maximum) != l.hi || sc.Default != l.def {
+				t.Errorf("%s %s: openapi default=%v min=%v max=%v, code %+v", path, p.Name, sc.Default, sc.Minimum, sc.Maximum, l)
+			}
+		}
+		sort.Strings(names)
+		if !slices.Equal(names, want.names) {
+			t.Errorf("%s: openapi params %v, handled %v", path, names, want.names)
 		}
 	}
 }

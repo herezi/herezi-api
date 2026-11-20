@@ -47,6 +47,7 @@ func (s *Server) Routes() []Route {
 	return []Route{
 		{http.MethodGet, "/healthz", s.healthz},
 		{http.MethodGet, "/v1/spots", s.listSpots},
+		{http.MethodGet, "/v1/spots/map", s.listSpotsInBBox}, // 리터럴 경로라 {id}보다 우선
 		{http.MethodGet, "/v1/spots/{id}", s.getSpot},
 	}
 }

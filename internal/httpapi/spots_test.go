@@ -22,6 +22,12 @@ type spot struct {
 	Category  string `json:"category"`
 	IsFree    *bool  `json:"is_free"`
 	DistanceM *int   `json:"distance_m"`
+	FetchedAt string `json:"fetched_at"`
+}
+
+type spotMap struct {
+	Items     []spot `json:"items"`
+	Truncated *bool  `json:"truncated"`
 }
 
 type page struct {
@@ -75,9 +81,11 @@ func near(kv ...string) url.Values {
 	return v
 }
 
-func ids(p page) []string {
+func ids(p page) []string { return spotIDs(p.Items) }
+
+func spotIDs(items []spot) []string {
 	out := []string{}
-	for _, it := range p.Items {
+	for _, it := range items {
 		out = append(out, strings.TrimPrefix(it.ID, "test:"))
 	}
 	return out
@@ -172,6 +180,9 @@ func TestGetSpot(t *testing.T) {
 	if s.DistanceM != nil {
 		t.Error("distance_m must be omitted on detail")
 	}
+	if ft, err := time.Parse(time.RFC3339, s.FetchedAt); err != nil || !ft.Equal(storetest.FetchedAt) {
+		t.Errorf("fetched_at = %q, want %v", s.FetchedAt, storetest.FetchedAt)
+	}
 	for _, id := range []string{"test:ended", "test:nope"} {
 		var e apiError
 		res := get(t, srv, "/v1/spots/"+id, nil, &e)
@@ -211,6 +222,89 @@ func TestListSpotsBadParams(t *testing.T) {
 			}
 			if e.Code != "invalid_parameter" || e.Message == "" {
 				t.Fatalf("error body %+v", e)
+			}
+		})
+	}
+}
+
+// box is a bbox around the fixtures: just south of City Hall to ~1.6km north.
+func box(kv ...string) url.Values {
+	v := url.Values{"sw_lat": {"37.5653"}, "sw_lng": {"126.9769"}, "ne_lat": {"37.5813"}, "ne_lng": {"126.9789"}}
+	for i := 0; i+1 < len(kv); i += 2 {
+		v.Set(kv[i], kv[i+1])
+	}
+	return v
+}
+
+func TestListSpotsInBBox(t *testing.T) {
+	srv := newServer(t)
+	cases := []struct {
+		name      string
+		params    url.Values
+		want      []string
+		truncated bool
+	}{
+		{"default now, center first, ended hidden", box(), []string{"mid-popup", "near-festival-free"}, false},
+		{"limit truncates", box("limit", "1"), []string{"mid-popup"}, true},
+		{"limit equal to count is not truncated", box("limit", "2"), []string{"mid-popup", "near-festival-free"}, false},
+		{"free=true", box("free", "true"), []string{"near-festival-free"}, false},
+		{"category", box("category", "popup"), []string{"mid-popup"}, false},
+		{"when=week", box("when", "week"), []string{"tomorrow", "mid-popup", "near-festival-free"}, false},
+		{"empty area", box("sw_lat", "35.0", "ne_lat", "35.1"), []string{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m spotMap
+			res := get(t, srv, "/v1/spots/map", tc.params, &m)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("status %d", res.StatusCode)
+			}
+			if m.Items == nil || m.Truncated == nil {
+				t.Fatal("items and truncated are required")
+			}
+			if got := spotIDs(m.Items); !slices.Equal(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			if *m.Truncated != tc.truncated {
+				t.Errorf("truncated = %v, want %v", *m.Truncated, tc.truncated)
+			}
+			for _, it := range m.Items {
+				if it.DistanceM != nil {
+					t.Errorf("%s: distance_m must be omitted on map", it.ID)
+				}
+				if it.FetchedAt == "" {
+					t.Errorf("%s: fetched_at missing", it.ID)
+				}
+			}
+			if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=60") {
+				t.Errorf("Cache-Control = %q", cc)
+			}
+		})
+	}
+}
+
+func TestListSpotsInBBoxBadParams(t *testing.T) {
+	srv := newServer(t)
+	cases := map[string]url.Values{
+		"missing sw_lat":   {"sw_lng": {"126.9"}, "ne_lat": {"37.6"}, "ne_lng": {"127.0"}},
+		"missing ne_lng":   {"sw_lat": {"37.5"}, "sw_lng": {"126.9"}, "ne_lat": {"37.6"}},
+		"not a number":     box("sw_lat", "x"),
+		"lat out of range": box("ne_lat", "90.1"),
+		"lng out of range": box("sw_lng", "-180.5"),
+		"sw north of ne":   box("sw_lat", "37.6", "ne_lat", "37.5"),
+		"antimeridian":     box("sw_lng", "127.1", "ne_lng", "126.9"),
+		"limit zero":       box("limit", "0"),
+		"limit too big":    box("limit", "501"),
+		"bad category":     box("category", "free"),
+		"bad when":         box("when", "later"),
+		"bad free":         box("free", "1"),
+	}
+	for name, params := range cases {
+		t.Run(name, func(t *testing.T) {
+			var e apiError
+			res := get(t, srv, "/v1/spots/map", params, &e)
+			if res.StatusCode != http.StatusBadRequest || e.Code != "invalid_parameter" || e.Message == "" {
+				t.Fatalf("got %d %+v", res.StatusCode, e)
 			}
 		})
 	}

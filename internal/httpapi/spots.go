@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,9 @@ const (
 	maxRadiusM     = 20000
 	defaultLimit   = 30
 	maxLimit       = 100
+	// /v1/spots/map
+	defaultMapLimit = 200
+	maxMapLimit     = 500
 )
 
 // cacheControl is sent on successful spot responses (TECH-PLAN.md §4).
@@ -42,6 +46,7 @@ type spotJSON struct {
 	ImageURL  string          `json:"image_url,omitempty"`
 	Source    string          `json:"source"`
 	SourceURL string          `json:"source_url,omitempty"`
+	FetchedAt time.Time       `json:"fetched_at"`
 	DistanceM *int            `json:"distance_m,omitempty"`
 }
 
@@ -51,12 +56,18 @@ type spotPageJSON struct {
 	NextCursor string     `json:"next_cursor,omitempty"`
 }
 
+// spotMapJSON is components.schemas.SpotMap.
+type spotMapJSON struct {
+	Items     []spotJSON `json:"items"`
+	Truncated bool       `json:"truncated"`
+}
+
 func toSpotJSON(s domain.Spot) spotJSON {
 	return spotJSON{
 		ID: s.ID, Title: s.Title, Summary: s.Summary, Category: s.Category,
 		Lat: s.Lat, Lng: s.Lng, Address: s.Address, PlaceName: s.PlaceName,
 		StartsAt: s.StartsAt, EndsAt: s.EndsAt, IsFree: s.IsFree, ImageURL: s.ImageURL,
-		Source: s.Source, SourceURL: s.SourceURL, DistanceM: s.DistanceM,
+		Source: s.Source, SourceURL: s.SourceURL, FetchedAt: s.FetchedAt, DistanceM: s.DistanceM,
 	}
 }
 
@@ -84,6 +95,32 @@ func (s *Server) listSpots(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", cacheControl)
 	writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) listSpotsInBBox(w http.ResponseWriter, r *http.Request) {
+	q, err := s.parseBBoxQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidParameter, err.Error())
+		return
+	}
+	limit := q.Limit
+	q.Limit = limit + 1 // fetch one extra to know whether the result was truncated
+	spots, err := s.spots.SpotsInBBox(r.Context(), q)
+	if err != nil {
+		s.log.Error("spots in bbox", "err", err)
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	res := spotMapJSON{Items: make([]spotJSON, 0, min(len(spots), limit))}
+	if len(spots) > limit {
+		spots = spots[:limit]
+		res.Truncated = true
+	}
+	for _, sp := range spots {
+		res.Items = append(res.Items, toSpotJSON(sp))
+	}
+	w.Header().Set("Cache-Control", cacheControl)
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) getSpot(w http.ResponseWriter, r *http.Request) {
@@ -117,22 +154,60 @@ func (s *Server) parseListQuery(r *http.Request) (store.NearbyQuery, error) {
 	if q.Limit, err = parseIntParam(v.Get("limit"), "limit", defaultLimit, 1, maxLimit); err != nil {
 		return q, err
 	}
-	if q.Categories, err = domain.ParseCategories(v.Get("category")); err != nil {
-		return q, fmt.Errorf("category: %w", err)
-	}
-	when, err := domain.ParseWhen(v.Get("when"))
-	if err != nil {
+	if q.SpotFilter, err = s.parseFilter(v); err != nil {
 		return q, err
 	}
-	if q.FreeOnly, err = parseBoolParam(v.Get("free"), "free"); err != nil {
-		return q, err
-	}
-	q.Now = s.now()
-	q.From, q.To = when.Window(q.Now)
 	if q.Offset, err = decodeCursor(v.Get("cursor")); err != nil {
 		return q, err
 	}
 	return q, nil
+}
+
+func (s *Server) parseBBoxQuery(r *http.Request) (store.BBoxQuery, error) {
+	v := r.URL.Query()
+	var q store.BBoxQuery
+	var err error
+	for _, c := range []struct {
+		dst    *float64
+		name   string
+		absMax float64
+	}{
+		{&q.SwLat, "sw_lat", 90}, {&q.SwLng, "sw_lng", 180},
+		{&q.NeLat, "ne_lat", 90}, {&q.NeLng, "ne_lng", 180},
+	} {
+		if *c.dst, err = parseCoord(v.Get(c.name), c.name, c.absMax); err != nil {
+			return q, err
+		}
+	}
+	if err = q.Validate(); err != nil {
+		return q, err
+	}
+	if q.Limit, err = parseIntParam(v.Get("limit"), "limit", defaultMapLimit, 1, maxMapLimit); err != nil {
+		return q, err
+	}
+	if q.SpotFilter, err = s.parseFilter(v); err != nil {
+		return q, err
+	}
+	return q, nil
+}
+
+// parseFilter parses category, when and free, shared by /v1/spots and /v1/spots/map.
+func (s *Server) parseFilter(v url.Values) (store.SpotFilter, error) {
+	var f store.SpotFilter
+	var err error
+	if f.Categories, err = domain.ParseCategories(v.Get("category")); err != nil {
+		return f, fmt.Errorf("category: %w", err)
+	}
+	when, err := domain.ParseWhen(v.Get("when"))
+	if err != nil {
+		return f, err
+	}
+	if f.FreeOnly, err = parseBoolParam(v.Get("free"), "free"); err != nil {
+		return f, err
+	}
+	f.Now = s.now()
+	f.From, f.To = when.Window(f.Now)
+	return f, nil
 }
 
 func parseCoord(raw, name string, absMax float64) (float64, error) {
