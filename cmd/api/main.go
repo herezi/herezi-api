@@ -35,11 +35,11 @@ func run(log *slog.Logger) error {
 
 	var spots store.SpotReader
 	if url := os.Getenv("DATABASE_URL"); url != "" {
-		pg, pool, err := postgres.Open(ctx, url)
+		pg, err := postgres.Open(ctx, url)
 		if err != nil {
 			return err
 		}
-		defer pool.Close()
+		defer func() { _ = pg.Close() }()
 		spots = pg
 		log.Info("store: postgres")
 	} else {

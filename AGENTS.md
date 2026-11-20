@@ -27,7 +27,7 @@ cmd/ingest/                 수집 배치 진입점 (스텁)
 internal/domain/            핵심 타입·규칙 (Spot, Category, When, 거리). 다른 internal 패키지 import 금지
 internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, NearbyQuery)
 internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 때) + 서울 예시 데이터
-internal/store/postgres/    PostGIS 저장소. queries.sql → sqlcdb/(sqlc 생성물, 직접 수정 금지)
+internal/store/postgres/    PostGIS 저장소 (GORM, 공간 조건은 raw 표현식)
 internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
 migrations/                 goose SQL 마이그레이션 (embed)
@@ -42,7 +42,6 @@ docs/adr/                   ADR (NNNN-제목.md)
 | `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소) |
 | `make test` | 단위·핸들러 테스트만 (DB 불필요) |
 | `make test-integration` | PostGIS 통합 테스트. `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
-| `make generate` | `queries.sql` → `sqlcdb/` 재생성 (sqlc 필요: `brew install sqlc`) |
 
 로컬에 Docker·PostGIS가 없어도 `make check`는 돌아간다. 통합 테스트는 빌드 태그 `integration`으로 분리되어 있다.
 
@@ -54,6 +53,6 @@ docs/adr/                   ADR (NNNN-제목.md)
 5. **큰 결정은 ADR로.** 스택·저장소·외부 서비스·계층 규칙을 바꾸는 결정은 `docs/adr/NNNN-제목.md`로 남기고 TECH-PLAN.md도 함께 고친다.
 6. **계층 규칙을 지킨다.** [ARCHITECTURE.md](ARCHITECTURE.md) 참고. `domain`은 아무것도 import하지 않고, `cmd`만 구체 구현을 조립한다.
 7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 어떤 응답에도 넣지 않는다. 무료는 카테고리가 아니라 `free=true` 필터다.
-8. **SQL은 `queries.sql`에서.** `sqlcdb/`는 생성물이므로 손으로 고치지 않는다. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
+8. **DB 접근은 GORM, 스키마는 goose 마이그레이션.** 테이블·컬럼·인덱스는 `migrations/`에 새 SQL 파일로만 바꾼다. **`AutoMigrate` 금지**(PostGIS geography·GiST 인덱스를 표현할 수 없다). GORM 모델은 `internal/store/postgres` 안에만 두고 `domain`은 gorm을 import하지 않는다. 공간 조건은 raw 표현식에 `?` 바인딩으로. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
 9. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Secret Manager).
 10. 문서·주석은 한국어, 코드 식별자는 영어.
