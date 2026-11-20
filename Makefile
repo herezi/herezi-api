@@ -30,7 +30,7 @@ test:
 ## test-integration: PostGIS 통합 테스트. HEREZI_TEST_DATABASE_URL 필요(버려도 되는 DB).
 test-integration:
 	@test -n "$$HEREZI_TEST_DATABASE_URL" || (echo "HEREZI_TEST_DATABASE_URL를 설정하세요"; exit 1)
-	go test -tags integration -count=1 ./internal/store/postgres/...
+	go test -tags integration -count=1 -v ./internal/store/postgres/...
 
 ## run: API 서버 실행. DATABASE_URL이 없으면 예시 데이터 메모리 저장소.
 run:
