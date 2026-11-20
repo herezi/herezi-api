@@ -3,6 +3,10 @@
 // 환경 변수:
 //   - PORT: 기본 8080
 //   - DATABASE_URL: PostgreSQL(PostGIS) 접속 문자열. 없으면 예시 데이터가 든 메모리 저장소로 뜬다.
+//   - NCP_MAPS_CLIENT_ID / NCP_MAPS_CLIENT_SECRET: 네이버 클라우드 Maps 키(역지오코딩).
+//     없으면 /v1/geo/reverse는 501.
+//
+// 로컬 개발: 작업 디렉터리의 .env(gitignore)가 있으면 아직 설정되지 않은 변수만 읽어 온다.
 package main
 
 import (
@@ -15,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/httpapi"
 	"github.com/herezi/herezi-api/internal/store"
 	"github.com/herezi/herezi-api/internal/store/memory"
@@ -33,6 +38,12 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if n, err := loadDotEnv(".env"); err != nil {
+		return err
+	} else if n > 0 {
+		log.Info("loaded .env", "vars", n) // 값은 남기지 않는다
+	}
+
 	var spots store.SpotReader
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		pg, err := postgres.Open(ctx, url)
@@ -47,13 +58,21 @@ func run(log *slog.Logger) error {
 		log.Warn("store: memory with seed data (DATABASE_URL not set)")
 	}
 
+	var opts []httpapi.Option
+	if id, secret := os.Getenv("NCP_MAPS_CLIENT_ID"), os.Getenv("NCP_MAPS_CLIENT_SECRET"); id != "" && secret != "" {
+		opts = append(opts, httpapi.WithGeocoder(geo.NewCache(geo.NewNaver(id, secret), geo.DefaultCacheTTL)))
+		log.Info("geocoder: naver")
+	} else {
+		log.Warn("geocoder: disabled (NCP_MAPS_CLIENT_ID/SECRET not set), /v1/geo/reverse returns 501")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.New(spots, log).Handler(),
+		Handler:           httpapi.New(spots, log, opts...).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

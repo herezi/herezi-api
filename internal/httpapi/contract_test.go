@@ -111,10 +111,11 @@ func TestRoutesMatchOpenAPI(t *testing.T) {
 func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 	doc := loadOpenAPI(t)
 	for name, typ := range map[string]reflect.Type{
-		"Spot":     reflect.TypeFor[spotJSON](),
-		"SpotPage": reflect.TypeFor[spotPageJSON](),
-		"SpotMap":  reflect.TypeFor[spotMapJSON](),
-		"Error":    reflect.TypeFor[errorBody](),
+		"Spot":       reflect.TypeFor[spotJSON](),
+		"SpotPage":   reflect.TypeFor[spotPageJSON](),
+		"SpotMap":    reflect.TypeFor[spotMapJSON](),
+		"Error":      reflect.TypeFor[errorBody](),
+		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
 	} {
 		var got, want []string
 		for i := range typ.NumField() {
@@ -136,10 +137,11 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
 	doc := loadOpenAPI(t)
 	for name, typ := range map[string]reflect.Type{
-		"Spot":     reflect.TypeFor[spotJSON](),
-		"SpotPage": reflect.TypeFor[spotPageJSON](),
-		"SpotMap":  reflect.TypeFor[spotMapJSON](),
-		"Error":    reflect.TypeFor[errorBody](),
+		"Spot":       reflect.TypeFor[spotJSON](),
+		"SpotPage":   reflect.TypeFor[spotPageJSON](),
+		"SpotMap":    reflect.TypeFor[spotMapJSON](),
+		"Error":      reflect.TypeFor[errorBody](),
+		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
 	} {
 		var got []string
 		for i := range typ.NumField() {
@@ -176,6 +178,7 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 			names:  []string{"category", "free", "limit", "ne_lat", "ne_lng", "sw_lat", "sw_lng", "when"},
 			limits: map[string]lim{"limit": {defaultMapLimit, 1, maxMapLimit}},
 		},
+		"/v1/geo/reverse": {names: []string{"lat", "lng"}},
 	} {
 		var names []string
 		for _, p := range doc.Paths[path]["get"].Parameters {

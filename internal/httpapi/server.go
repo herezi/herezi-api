@@ -1,5 +1,5 @@
 // Package httpapi implements the public HTTP API described in api/openapi.yaml.
-// It may import domain and store (interfaces) only — never ingest or normalize
+// It may import domain, store (interfaces) and geo (interface + types) only — never ingest or normalize
 // (see ARCHITECTURE.md). Wiring of concrete stores happens in cmd/api.
 package httpapi
 
@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/store"
 )
 
@@ -22,9 +23,10 @@ type Route struct {
 
 // Server holds handler dependencies.
 type Server struct {
-	spots store.SpotReader
-	log   *slog.Logger
-	now   func() time.Time
+	spots    store.SpotReader
+	geocoder geo.ReverseGeocoder // nil이면 /v1/geo/reverse는 501
+	log      *slog.Logger
+	now      func() time.Time
 }
 
 // Option configures a Server.
@@ -49,6 +51,7 @@ func (s *Server) Routes() []Route {
 		{http.MethodGet, "/v1/spots", s.listSpots},
 		{http.MethodGet, "/v1/spots/map", s.listSpotsInBBox}, // 리터럴 경로라 {id}보다 우선
 		{http.MethodGet, "/v1/spots/{id}", s.getSpot},
+		{http.MethodGet, "/v1/geo/reverse", s.reverseGeocode},
 	}
 }
 
@@ -76,6 +79,8 @@ const (
 	codeInvalidParameter = "invalid_parameter"
 	codeNotFound         = "not_found"
 	codeInternal         = "internal"
+	codeNotConfigured    = "not_configured"
+	codeUpstream         = "upstream_error"
 )
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {

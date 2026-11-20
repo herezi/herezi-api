@@ -22,7 +22,8 @@
 | `internal/domain` | 표준 라이브러리만 | 다른 모든 internal 패키지 |
 | `internal/store` | `domain` | 구현체(`memory`, `postgres`), `httpapi` |
 | `internal/store/memory`, `internal/store/postgres` | `domain`, `store` | `httpapi`, 서로 |
-| `internal/httpapi` | `domain`, `store`(인터페이스) | 구체 저장소, ingest 관련 패키지 |
+| `internal/httpapi` | `domain`, `store`(인터페이스), `geo`(인터페이스·타입) | 구체 저장소, ingest 관련 패키지 |
+| `internal/geo` | `domain`, 표준 라이브러리 | `store`, `httpapi`, ingest 관련 패키지 |
 | `cmd/*` | 모두 | — (조립만 하고 로직을 두지 않는다) |
 | `internal/store/storetest` | `domain`, `store` | 구현체 (구현체의 테스트가 이 패키지를 부른다) |
 
@@ -37,6 +38,12 @@
 `GET /v1/spots/map`도 같은 필터(끝난 행사 제외)를 쓴다. 반면 **상세 `GET /v1/spots/{id}`는 끝난 행사도 반환한다**:
 저장소 `SpotByID`는 시각 조건 없이 ID로만 찾고(없으면 `ErrNotFound` → 404), 핸들러가 요청 시계(`s.now()`)로
 `is_ended`(= `domain.Spot.Ended(now)`)를 계산해 붙인다. 목록·지도 응답의 `is_ended`는 항상 `false`다.
+
+## 역지오코딩: `GET /v1/geo/reverse`
+- 네이버 Reverse Geocoding은 Client Secret이 필요하므로 앱 대신 서버가 부른다.
+- `internal/geo`: `ReverseGeocoder` 인터페이스, 네이버 클라이언트(`Naver`, 타임아웃 2초), 메모리 캐시(`Cache`, 좌표 소수 3자리 반올림·TTL 1일, 실패는 캐시 안 함).
+- `cmd/api`가 `NCP_MAPS_CLIENT_ID`/`NCP_MAPS_CLIENT_SECRET`이 있을 때만 `Cache(Naver)`를 `httpapi.WithGeocoder`로 꽂는다. 없으면 501.
+- 핸들러 테스트는 가짜 `ReverseGeocoder`, 네이버 클라이언트는 `httptest`로 요청·파싱을 검증한다.
 
 ## 계약과 테스트
 - `api/openapi.yaml`이 단일 기준. `internal/httpapi/contract_test.go`가 카테고리 enum, `when` enum, 라우트 목록, 응답 JSON 필드를 대조한다.
