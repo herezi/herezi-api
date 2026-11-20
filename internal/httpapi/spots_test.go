@@ -23,6 +23,7 @@ type spot struct {
 	IsFree    *bool  `json:"is_free"`
 	DistanceM *int   `json:"distance_m"`
 	FetchedAt string `json:"fetched_at"`
+	IsEnded   *bool  `json:"is_ended"`
 }
 
 type spotMap struct {
@@ -141,6 +142,9 @@ func TestListSpotsFilters(t *testing.T) {
 				if it.ID == "test:ended" {
 					t.Error("ended spot returned")
 				}
+				if it.IsEnded == nil || *it.IsEnded {
+					t.Errorf("%s: is_ended = %v, want false", it.ID, it.IsEnded)
+				}
 			}
 			if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=60") {
 				t.Errorf("Cache-Control = %q", cc)
@@ -183,12 +187,52 @@ func TestGetSpot(t *testing.T) {
 	if ft, err := time.Parse(time.RFC3339, s.FetchedAt); err != nil || !ft.Equal(storetest.FetchedAt) {
 		t.Errorf("fetched_at = %q, want %v", s.FetchedAt, storetest.FetchedAt)
 	}
-	for _, id := range []string{"test:ended", "test:nope"} {
-		var e apiError
-		res := get(t, srv, "/v1/spots/"+id, nil, &e)
-		if res.StatusCode != http.StatusNotFound || e.Code != "not_found" || e.Message == "" {
-			t.Errorf("%s: got %d %+v", id, res.StatusCode, e)
-		}
+	if s.IsEnded == nil || *s.IsEnded {
+		t.Errorf("is_ended = %v, want false", s.IsEnded)
+	}
+	var e apiError
+	res = get(t, srv, "/v1/spots/test:nope", nil, &e)
+	if res.StatusCode != http.StatusNotFound || e.Code != "not_found" || e.Message == "" {
+		t.Errorf("missing: got %d %+v", res.StatusCode, e)
+	}
+}
+
+// 끝난 행사: 목록·지도에선 숨기지만 상세는 200 + is_ended=true (PRODUCT.md 원칙 3).
+func TestGetSpotEnded(t *testing.T) {
+	srv := newServer(t)
+	var s spot
+	res := get(t, srv, "/v1/spots/test:ended", nil, &s)
+	if res.StatusCode != http.StatusOK || s.ID != "test:ended" {
+		t.Fatalf("got %d %+v", res.StatusCode, s)
+	}
+	if s.IsEnded == nil || !*s.IsEnded {
+		t.Errorf("is_ended = %v, want true", s.IsEnded)
+	}
+}
+
+// is_ended는 저장값이 아니라 요청 시계 기준으로 계산된다.
+func TestGetSpotIsEndedUsesClock(t *testing.T) {
+	st := memory.New(storetest.Fixtures()...)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		want bool
+	}{
+		{"before end", storetest.Now.Add(-2 * time.Hour), false},
+		{"exactly at end", storetest.Now.Add(-time.Hour), false},
+		{"after end", storetest.Now, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := httpapi.New(st, log, httpapi.WithClock(func() time.Time { return tc.now })).Handler()
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+			var s spot
+			res := get(t, srv, "/v1/spots/test:ended", nil, &s)
+			if res.StatusCode != http.StatusOK || s.IsEnded == nil || *s.IsEnded != tc.want {
+				t.Fatalf("got %d is_ended=%v, want %v", res.StatusCode, s.IsEnded, tc.want)
+			}
+		})
 	}
 }
 
@@ -271,6 +315,12 @@ func TestListSpotsInBBox(t *testing.T) {
 			for _, it := range m.Items {
 				if it.DistanceM != nil {
 					t.Errorf("%s: distance_m must be omitted on map", it.ID)
+				}
+				if it.ID == "test:ended" {
+					t.Error("ended spot returned on map")
+				}
+				if it.IsEnded == nil || *it.IsEnded {
+					t.Errorf("%s: is_ended = %v, want false", it.ID, it.IsEnded)
 				}
 				if it.FetchedAt == "" {
 					t.Errorf("%s: fetched_at missing", it.ID)

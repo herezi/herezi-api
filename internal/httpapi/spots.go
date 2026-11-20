@@ -48,6 +48,7 @@ type spotJSON struct {
 	SourceURL string          `json:"source_url,omitempty"`
 	FetchedAt time.Time       `json:"fetched_at"`
 	DistanceM *int            `json:"distance_m,omitempty"`
+	IsEnded   bool            `json:"is_ended"`
 }
 
 // spotPageJSON is components.schemas.SpotPage.
@@ -62,12 +63,14 @@ type spotMapJSON struct {
 	Truncated bool       `json:"truncated"`
 }
 
-func toSpotJSON(s domain.Spot) spotJSON {
+// toSpotJSON converts a spot; is_ended is computed against now (the request clock).
+func toSpotJSON(s domain.Spot, now time.Time) spotJSON {
 	return spotJSON{
 		ID: s.ID, Title: s.Title, Summary: s.Summary, Category: s.Category,
 		Lat: s.Lat, Lng: s.Lng, Address: s.Address, PlaceName: s.PlaceName,
 		StartsAt: s.StartsAt, EndsAt: s.EndsAt, IsFree: s.IsFree, ImageURL: s.ImageURL,
 		Source: s.Source, SourceURL: s.SourceURL, FetchedAt: s.FetchedAt, DistanceM: s.DistanceM,
+		IsEnded: s.Ended(now),
 	}
 }
 
@@ -91,7 +94,7 @@ func (s *Server) listSpots(w http.ResponseWriter, r *http.Request) {
 		page.NextCursor = encodeCursor(q.Offset + limit)
 	}
 	for _, sp := range spots {
-		page.Items = append(page.Items, toSpotJSON(sp))
+		page.Items = append(page.Items, toSpotJSON(sp, q.Now))
 	}
 	w.Header().Set("Cache-Control", cacheControl)
 	writeJSON(w, http.StatusOK, page)
@@ -117,14 +120,15 @@ func (s *Server) listSpotsInBBox(w http.ResponseWriter, r *http.Request) {
 		res.Truncated = true
 	}
 	for _, sp := range spots {
-		res.Items = append(res.Items, toSpotJSON(sp))
+		res.Items = append(res.Items, toSpotJSON(sp, q.Now))
 	}
 	w.Header().Set("Cache-Control", cacheControl)
 	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) getSpot(w http.ResponseWriter, r *http.Request) {
-	sp, err := s.spots.SpotByID(r.Context(), r.PathValue("id"), s.now())
+	now := s.now()
+	sp, err := s.spots.SpotByID(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, codeNotFound, "spot not found")
 		return
@@ -135,7 +139,7 @@ func (s *Server) getSpot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", cacheControl)
-	writeJSON(w, http.StatusOK, toSpotJSON(sp))
+	writeJSON(w, http.StatusOK, toSpotJSON(sp, now))
 }
 
 func (s *Server) parseListQuery(r *http.Request) (store.NearbyQuery, error) {

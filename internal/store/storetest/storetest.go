@@ -23,7 +23,8 @@ var FetchedAt = Now.Add(-30 * time.Minute)
 // City Hall, Seoul.
 const baseLat, baseLng = 37.5663, 126.9779
 
-// Fixtures returns the spots the suite inserts. IDs encode the expectation.
+// Fixtures returns the spots the suite inserts. IDs encode the expectation
+// ("ended"는 목록·지도에선 숨고 상세에서만 보인다).
 func Fixtures() []domain.Spot {
 	h := time.Hour
 	ptr := func(t time.Time) *time.Time { return &t }
@@ -181,7 +182,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 	})
 
 	t.Run("by id", func(t *testing.T) {
-		got, err := s.SpotByID(ctx, domain.SpotID("test", "mid-popup"), Now)
+		got, err := s.SpotByID(ctx, domain.SpotID("test", "mid-popup"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,11 +194,20 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 		}
 	})
 
-	t.Run("by id hides ended and missing", func(t *testing.T) {
-		for _, id := range []string{domain.SpotID("test", "ended"), "test:nope"} {
-			if _, err := s.SpotByID(ctx, id, Now); !errors.Is(err, store.ErrNotFound) {
-				t.Errorf("%s: err = %v, want ErrNotFound", id, err)
-			}
+	t.Run("by id returns ended", func(t *testing.T) {
+		got, err := s.SpotByID(ctx, domain.SpotID("test", "ended"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Fixtures()[3]
+		if got.EndsAt == nil || !got.EndsAt.Equal(*want.EndsAt) || !got.Ended(Now) {
+			t.Fatalf("got %+v, want ended spot", got)
+		}
+	})
+
+	t.Run("by id missing", func(t *testing.T) {
+		if _, err := s.SpotByID(ctx, "test:nope"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("err = %v, want ErrNotFound", err)
 		}
 	})
 
@@ -208,7 +218,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 		if err := s.UpsertSpot(ctx, sp); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.SpotByID(ctx, sp.ID, Now)
+		got, err := s.SpotByID(ctx, sp.ID)
 		if err != nil || got.FetchedAt.Before(before) {
 			t.Fatalf("fetched_at = %v, %v", got.FetchedAt, err)
 		}
@@ -220,7 +230,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 		if err := s.UpsertSpot(ctx, sp); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.SpotByID(ctx, sp.ID, Now)
+		got, err := s.SpotByID(ctx, sp.ID)
 		if err != nil || got.Title != "changed" {
 			t.Fatalf("got %+v, %v", got, err)
 		}
