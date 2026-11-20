@@ -56,3 +56,6 @@ docs/adr/                   ADR (NNNN-제목.md)
 8. **DB 접근은 GORM, 스키마는 goose 마이그레이션.** 테이블·컬럼·인덱스는 `migrations/`에 새 SQL 파일로만 바꾼다. **`AutoMigrate` 금지**(PostGIS geography·GiST 인덱스를 표현할 수 없다). GORM 모델은 `internal/store/postgres` 안에만 두고 `domain`은 gorm을 import하지 않는다. 공간 조건은 raw 표현식에 `?` 바인딩으로. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
 9. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Secret Manager).
 10. 문서·주석은 한국어, 코드 식별자는 영어.
+
+## 에이전트 역할
+역할별 지침은 [`agents/`](agents/README.md)에 있다(기획자·디자이너·리뷰어·QA·개발자). 어떤 LLM 도구든 역할을 맡으면 해당 파일(`agents/<역할>.md`)을 먼저 읽고 따른다. Claude Code는 `.claude/agents` 링크로 자동 인식한다.
