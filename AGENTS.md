@@ -31,6 +31,7 @@ internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 
 internal/store/postgres/    PostGIS 저장소 (GORM, 공간 조건은 raw 표현식)
 internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
+internal/geo/               역지오코딩 인터페이스·네이버 클라이언트·메모리 캐시
 migrations/                 goose SQL 마이그레이션 (embed)
 docs/product/               기획 문서
 docs/design/                디자인 시스템·화면 스펙·목업 (두 앱 공통)
@@ -41,7 +42,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 | 명령 | 설명 |
 |---|---|
 | `make check` | gofmt·go vet·staticcheck·go test. **PR 전에 반드시 통과** (CI도 같은 명령) |
-| `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소) |
+| `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소, 로컬 `.env`가 있으면 읽음) |
 | `make test` | 단위·핸들러 테스트만 (DB 불필요) |
 | `make test-integration` | PostGIS 통합 테스트. `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
 
