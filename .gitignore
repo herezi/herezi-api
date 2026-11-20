@@ -1,0 +1,14 @@
+# 빌드 산출물
+/bin/
+/api-server
+*.test
+*.out
+
+# 로컬 비밀값
+.env
+.env.*
+
+# 편집기·OS
+.DS_Store
+.idea/
+.vscode/

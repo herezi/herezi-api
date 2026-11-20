@@ -1,0 +1,59 @@
+# AGENTS.md — herezi-api
+
+에이전트(그리고 사람)가 이 레포에서 작업하기 전에 읽는 문서. 짧게 유지하고, 자세한 내용은 링크로 보낸다.
+
+## 이 레포는
+Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
+- `cmd/api`: 읽기 전용 공개 REST API. 앱(iOS·Android)은 위치·필터로 근처 항목을 조회만 한다.
+- `cmd/ingest`: 공공데이터 수집 배치(수집 → 정규화 → 지오코딩 → GPT 보강 → 중복 제거 → 저장). 지금은 스텁.
+- `api/openapi.yaml`: 서버·iOS·Android 사이 API 계약의 **단일 기준**.
+
+## 먼저 읽을 문서
+| 문서 | 내용 |
+|---|---|
+| [docs/product/PRODUCT.md](docs/product/PRODUCT.md) | 제품 한 줄·원칙·카테고리 (세 레포 공통 기준) |
+| [docs/product/SERVICE-PLAN.md](docs/product/SERVICE-PLAN.md) | 서비스 기획: 사용자·기능 우선순위·화면 |
+| [docs/product/TECH-PLAN.md](docs/product/TECH-PLAN.md) | 기술 기획: 구조·스택·API·인프라·일정 |
+| [docs/product/DATA-PLAN.md](docs/product/DATA-PLAN.md) | 데이터 기획: 소스·수집·정규화 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 패키지 계층과 의존 규칙 |
+| [docs/adr/](docs/adr/) | 아키텍처 결정 기록(ADR) |
+| [api/openapi.yaml](api/openapi.yaml) | API 계약 |
+
+## 폴더 구조
+```
+api/openapi.yaml            API 계약 (단일 기준)
+cmd/api/                    API 서버 진입점 (환경 변수 → 저장소 선택 → HTTP)
+cmd/ingest/                 수집 배치 진입점 (스텁)
+internal/domain/            핵심 타입·규칙 (Spot, Category, When, 거리). 다른 internal 패키지 import 금지
+internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, NearbyQuery)
+internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 때) + 서울 예시 데이터
+internal/store/postgres/    PostGIS 저장소. queries.sql → sqlcdb/(sqlc 생성물, 직접 수정 금지)
+internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
+internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
+migrations/                 goose SQL 마이그레이션 (embed)
+docs/product/               기획 문서
+docs/adr/                   ADR (NNNN-제목.md)
+```
+
+## 명령
+| 명령 | 설명 |
+|---|---|
+| `make check` | gofmt·go vet·staticcheck·go test. **PR 전에 반드시 통과** (CI도 같은 명령) |
+| `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소) |
+| `make test` | 단위·핸들러 테스트만 (DB 불필요) |
+| `make test-integration` | PostGIS 통합 테스트. `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
+| `make generate` | `queries.sql` → `sqlcdb/` 재생성 (sqlc 필요: `brew install sqlc`) |
+
+로컬에 Docker·PostGIS가 없어도 `make check`는 돌아간다. 통합 테스트는 빌드 태그 `integration`으로 분리되어 있다.
+
+## 규칙
+1. **이슈 → 브랜치 → PR → 머지.** 모든 작업은 GitHub 이슈에서 시작하고, 브랜치(`feat/…`, `fix/…`, `chore/…`, `docs/…`)에서 PR을 만든다. PR 본문에 `Closes #n`.
+2. **main에 직접 푸시하지 않는다.** `make check`와 CI가 통과한 PR만 squash 머지한다.
+3. **기획 먼저, 코드는 승인 후.** 새 기능·큰 변경은 관련 기획 문서(docs/product)가 승인된 뒤에 구현한다. 기획에 없는 동작이 필요하면 먼저 문서를 고치는 PR을 낸다.
+4. **`api/openapi.yaml`이 계약의 단일 기준.** 엔드포인트·필드·enum을 바꾸면 openapi를 먼저(같은 PR에서) 고친다. 계약 테스트(`internal/httpapi/contract_test.go`)가 카테고리 enum·라우트·JSON 필드를 대조한다. 하위호환을 지킨다(필드 삭제·의미 변경 금지, 추가는 가능).
+5. **큰 결정은 ADR로.** 스택·저장소·외부 서비스·계층 규칙을 바꾸는 결정은 `docs/adr/NNNN-제목.md`로 남기고 TECH-PLAN.md도 함께 고친다.
+6. **계층 규칙을 지킨다.** [ARCHITECTURE.md](ARCHITECTURE.md) 참고. `domain`은 아무것도 import하지 않고, `cmd`만 구체 구현을 조립한다.
+7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 어떤 응답에도 넣지 않는다. 무료는 카테고리가 아니라 `free=true` 필터다.
+8. **SQL은 `queries.sql`에서.** `sqlcdb/`는 생성물이므로 손으로 고치지 않는다. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
+9. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Secret Manager).
+10. 문서·주석은 한국어, 코드 식별자는 영어.
