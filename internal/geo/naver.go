@@ -3,6 +3,7 @@ package geo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -83,6 +84,11 @@ func (n *Naver) Reverse(ctx context.Context, lat, lng float64) (Region, error) {
 	}
 	res, err := hc.Do(req)
 	if err != nil {
+		// url.Error는 요청 URL(좌표 포함)을 메시지에 넣으므로 원인만 남긴다.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return Region{}, fmt.Errorf("naver reverse geocode: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()

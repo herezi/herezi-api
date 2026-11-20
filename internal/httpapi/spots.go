@@ -88,7 +88,7 @@ func (s *Server) listSpots(w http.ResponseWriter, r *http.Request) {
 	q.Limit = limit + 1 // fetch one extra to know whether there is a next page
 	spots, err := s.spots.NearbySpots(r.Context(), q)
 	if err != nil {
-		s.log.Error("nearby spots", "err", err)
+		s.log.Error("nearby spots", "err", logErr(err))
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
@@ -114,7 +114,7 @@ func (s *Server) listSpotsInBBox(w http.ResponseWriter, r *http.Request) {
 	q.Limit = limit + 1 // fetch one extra to know whether the result was truncated
 	spots, err := s.spots.SpotsInBBox(r.Context(), q)
 	if err != nil {
-		s.log.Error("spots in bbox", "err", err)
+		s.log.Error("spots in bbox", "err", logErr(err))
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
@@ -138,7 +138,7 @@ func (s *Server) getSpot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error("get spot", "err", err)
+		s.log.Error("get spot", "err", logErr(err))
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}

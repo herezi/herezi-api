@@ -108,7 +108,9 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "dur", time.Since(start))
+		// 원좌표는 남기지 않는다: 좌표 파라미터는 소수 둘째 자리로 줄인다(logQuery).
+		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "query", logQuery(r.URL.Query()),
+			"status", rec.status, "dur", time.Since(start))
 	})
 }
 

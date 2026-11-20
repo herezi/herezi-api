@@ -37,7 +37,7 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 	}
 	region, err := s.geocoder.Reverse(r.Context(), lat, lng)
 	if err != nil {
-		s.log.Warn("reverse geocode failed", "err", err)
+		s.log.Warn("reverse geocode failed", "err", logErr(err)) // 좌표 미포함
 		writeError(w, http.StatusBadGateway, codeUpstream, "reverse geocoding failed")
 		return
 	}
