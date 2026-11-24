@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -275,5 +276,100 @@ func TestPipeline(t *testing.T) {
 	}
 	if out := rep.String(); !strings.Contains(out, "seoul_culture") || !strings.Contains(out, "gpt_calls=1") {
 		t.Errorf("report = %s", out)
+	}
+}
+
+type fakePlaces struct {
+	byQuery map[string][]geo.Place
+	calls   int
+}
+
+func (f *fakePlaces) SearchPlace(_ context.Context, q string) ([]geo.Place, error) {
+	f.calls++
+	if q == "에러 나는 곳 종로구" {
+		return nil, errors.New("boom")
+	}
+	return f.byQuery[q], nil
+}
+
+func TestPipelinePlaceSearchFallback(t *testing.T) {
+	d := 24 * time.Hour
+	mk := func(id, place, gu string) Record {
+		r := rec("cultureinfo", id, "공연 "+id, 0, 0, now.Add(time.Hour), now.Add(d))
+		r.Spot.PlaceName, r.Gu = place, gu
+		return r
+	}
+	addr := mk("1", "세종문화회관 대극장", "종로구")
+	addr.AddressQuery = "서울특별시 종로구 세종대로 175"
+	kakao := mk("2", "국립국악원 예악당", "서초구")
+	again := mk("3", "국립국악원 예악당", "서초구")  // 같은 장소: 색인 재사용(카카오 재호출 없음)
+	unlike := mk("4", "작은 책방 모퉁이", "마포구") // 이름이 다른 후보만 → 탈락
+	outside := mk("5", "경기 아트센터", "")     // 서울 밖 후보 → 탈락
+	failing := mk("6", "에러 나는 곳", "종로구")
+	places := &fakePlaces{byQuery: map[string][]geo.Place{
+		"국립국악원 예악당 서초구": {{Name: "국립국악원 예악당", Lat: 37.4780, Lng: 127.0087}},
+		"작은 책방 모퉁이 마포구": {{Name: "마포구청", Lat: 37.5662, Lng: 126.9016}},
+		"경기 아트센터":       {{Name: "경기아트센터", Lat: 37.2610, Lng: 127.0300}},
+	}}
+	p := &Pipeline{
+		Sources:  []Source{fakeSource{name: "cultureinfo", recs: []Record{addr, kakao, again, unlike, outside, failing}}},
+		Geocoder: fakeGeocoder{"서울특별시 종로구 세종대로 175": {Lat: 37.5725, Lng: 126.9757, OK: true}},
+		Places:   places,
+		Now:      func() time.Time { return now },
+	}
+	res := p.Run(context.Background())
+	ci := res.Report.Sources[0]
+	if ci.Geocoded != 1 || ci.PlaceSearch != 1 || ci.PlaceIndex != 1 || ci.Dropped[DropNoCoords] != 3 {
+		t.Errorf("report = %+v", ci)
+	}
+	if places.calls != 5 || res.Report.PlaceCalls != 5 {
+		t.Errorf("kakao calls = %d / %d (네이버로 찾은 항목·색인 재사용은 카카오를 부르지 않고, '작은 책방 모퉁이'는 '작은 책방'까지 줄여 2회)", places.calls, res.Report.PlaceCalls)
+	}
+	byID := map[string]domain.Spot{}
+	for _, s := range res.Spots {
+		byID[s.ID] = s
+	}
+	if s := byID["cultureinfo:2"]; s.Lat != 37.4780 || s.Lng != 127.0087 {
+		t.Errorf("kakao coords = %v,%v", s.Lat, s.Lng)
+	}
+	if !strings.Contains(res.Report.String(), "kakao") {
+		t.Errorf("report header missing kakao column")
+	}
+}
+
+func TestSimilarPlaceName(t *testing.T) {
+	cases := []struct {
+		want, got string
+		ok        bool
+	}{
+		{"국립국악원 예악당", "국립국악원 예악당", true},
+		{"국립국악원 예악당", "국립국악원", true},          // 포함
+		{"예술의전당 오페라극장", "예술의전당 오페라하우스", true}, // bigram
+		{"북서울꿈의숲", "북서울 꿈의숲 아트센터", true},
+		{"작은 책방 모퉁이", "마포구청", false},
+		{"공원", "서울숲공원", false}, // 너무 짧음 + 유사도 낮음
+		{"", "아무곳", false},
+	}
+	for _, c := range cases {
+		if got := SimilarPlaceName(c.want, c.got); got != c.ok {
+			t.Errorf("SimilarPlaceName(%q, %q) = %v, want %v", c.want, c.got, got, c.ok)
+		}
+	}
+}
+
+func TestPlaceNames(t *testing.T) {
+	cases := map[string][]string{
+		"코엑스 2층 아셈볼룸":              {"코엑스 2층 아셈볼룸", "코엑스 2층", "코엑스"},
+		"거점 4호 우리동네키움센터 (4층 미디어실)": {"거점 4호 우리동네키움센터", "거점 4호"},
+		"서울특별시 중구 청계천 청계광장 일대":     {"중구 청계천 청계광장", "중구 청계천"},
+		"허준박물관 등":                  {"허준박물관"},
+		"4층 시네마라운지":                {"4층 시네마라운지"},
+		"":                         nil,
+		"갈산문화예술센터 아이누리홀":           {"갈산문화예술센터 아이누리홀", "갈산문화예술센터"},
+	}
+	for in, want := range cases {
+		if got := placeNames(in); !slices.Equal(got, want) {
+			t.Errorf("placeNames(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

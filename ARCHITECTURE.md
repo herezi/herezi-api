@@ -62,7 +62,7 @@
 
 ## 수집 배치: `cmd/ingest` (이슈 #42)
 ```
-sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖·90일 넘는 미래) ─▶ 좌표 보강(장소명 색인 → 네이버 Geocoding)
+sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖·90일 넘는 미래) ─▶ 좌표 보강(장소명 색인 → 네이버 Geocoding → 카카오 키워드)
    ─▶ Dedup(정규화 제목 + 기간 겹침 + 100m, 이미지·원본 좌표 있는 쪽이 대표) ─▶ GPT 보강(content_hash 캐시, 요청 수 상한, 배치 JSON)
    ─▶ Sink: DATABASE_URL 있으면 postgres.UpsertSpot, 없으면 snapshot.Write(-out)
 ```
@@ -71,4 +71,5 @@ sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖�
 - `internal/ingest/openai`: Chat Completions 배치 클라이언트(net/http). GPT는 요약(60자)·애매한 분류·애매한 무료만. 날짜·좌표·가격은 원천 값만 쓴다.
 - GPT 캐시: `domain.Spot.ContentHash`(원문 해시). postgres는 `content_hash` 컬럼(`EnrichedSpots`), 스냅샷은 이전 `-out` 파일을 읽어 해시가 같으면 재호출하지 않는다.
 - `cmd/api`는 `DATABASE_URL`이 없고 `SNAPSHOT_PATH`가 있으면 스냅샷을 메모리 저장소에 올린다. httpapi는 ingest 쪽을 import하지 않는다.
+- 좌표 보강 순서: ① 같은 구·같은 장소명의 다른 항목 좌표 ② 네이버 Geocoding(주소) ③ 카카오 키워드 검색(`geo.KakaoPlaces`, `KAKAO_REST_API_KEY`, "장소명 구", 서울 rect, 괄호·세부 공간을 줄인 이름 최대 3개). 카카오 후보는 서울 안 + 이름 유사도(`ingest.SimilarPlaceName`: 포함 또는 bigram Dice ≥ 0.5)를 통과한 첫 건만 쓴다. 질의 결과는 실행 동안 캐시하고, 찾은 좌표는 장소명 색인에 넣어 재사용한다.
 - 외부 호출 에러에는 URL(키·주소)을 넣지 않는다(`url.Error`를 풀고 HTTP 상태만).
