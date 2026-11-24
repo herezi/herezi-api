@@ -26,6 +26,7 @@
 | `MIGRATE_ON_START=1` | ✓ (시작 시 goose 마이그레이션) | — |
 | `SUPABASE_URL` | ✓ (로그인 토큰 JWKS 검증, 없으면 `/v1/me/*` 503) | — |
 | `SUPABASE_JWT_SECRET` | 선택 (레거시 HS256 토큰도 받을 때만) | — |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✓ (회원 탈퇴: Admin API 사용자 삭제, 없으면 `DELETE /v1/me` 503) | — |
 
 `PORT`는 Railway가 넣는다(api는 `$PORT`를 리슨, 기본 8080).
 

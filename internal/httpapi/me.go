@@ -178,3 +178,30 @@ func (s *Server) importSaved(w http.ResponseWriter, r *http.Request, user auth.U
 		writeJSON(w, http.StatusOK, importResultJSON{Imported: res.Imported, SkippedUnknown: res.SkippedUnknown})
 	}
 }
+
+// WithUserDeleter sets the auth-server user deleter for DELETE /v1/me. 없으면 503 auth_not_configured.
+func WithUserDeleter(d auth.UserDeleter) Option { return func(s *Server) { s.users = d } }
+
+// deleteMe는 회원 탈퇴다(S6, App Store 심사 지침 5.1.1(v)).
+//
+// 순서: ① Supabase Admin API로 사용자 삭제 → ② 성공하면 저장 행 삭제 → 204.
+//   - ①이 실패하면 502 upstream_error, 저장 행은 그대로 둔다(계정이 남았는데 저장만 사라지지 않게). 앱은 재시도한다.
+//   - ①은 성공했는데 ②가 실패하면 500. 액세스 토큰은 만료 전까지 유효하므로 앱이 재시도하면
+//     ①은 이미 없는 사용자(404)라 성공으로 넘어가고 ②를 다시 한다(멱등).
+func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request, user auth.User) {
+	if s.users == nil {
+		writeError(w, http.StatusServiceUnavailable, codeAuthNotConfigured, "account deletion is not configured")
+		return
+	}
+	if err := s.users.DeleteUser(r.Context(), user.ID); err != nil {
+		s.log.Error("delete auth user", "err", logErr(err)) // 사용자 ID·키는 남기지 않는다
+		writeError(w, http.StatusBadGateway, codeUpstream, "failed to delete account")
+		return
+	}
+	if _, err := s.saved.DeleteUserSaved(r.Context(), user.ID); err != nil {
+		s.log.Error("delete user saved", "err", logErr(err))
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

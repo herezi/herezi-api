@@ -50,7 +50,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 | `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소 — `SNAPSHOT_PATH`가 있으면 그 스냅샷, 없으면 예시 데이터. 로컬 `.env`가 있으면 읽음) |
 | `make ingest` | 수집 배치 1회 (`go run ./cmd/ingest -out data/snapshot.json`). 키는 `.env`. GPT는 월 한도 공유라 `-max-gpt`로 요청 수를 제한 |
 | `make test` | 단위·핸들러 테스트만 (DB 불필요) |
-| `make test-integration` | PostGIS 통합 테스트. `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
+| `make test-integration` | PostGIS 통합 테스트(저장소 스위트 + `/v1/me` 저장→탈퇴 흐름). `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
 
 로컬에 Docker·PostGIS가 없어도 `make check`는 돌아간다. 통합 테스트는 빌드 태그 `integration`으로 분리되어 있다.
 
