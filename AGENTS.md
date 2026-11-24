@@ -45,6 +45,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 | 명령 | 설명 |
 |---|---|
 | `make check` | gofmt·go vet·staticcheck·go test. **PR 전에 반드시 통과** (CI도 같은 명령) |
+| `docker build -t herezi-api .` | 운영 이미지(cmd/api 기본 실행, `/app/ingest`도 포함). `PORT` 리슨, `MIGRATE_ON_START=1`이면 시작 시 goose 마이그레이션 |
 | `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소 — `SNAPSHOT_PATH`가 있으면 그 스냅샷, 없으면 예시 데이터. 로컬 `.env`가 있으면 읽음) |
 | `make ingest` | 수집 배치 1회 (`go run ./cmd/ingest -out data/snapshot.json`). 키는 `.env`. GPT는 월 한도 공유라 `-max-gpt`로 요청 수를 제한 |
 | `make test` | 단위·핸들러 테스트만 (DB 불필요) |
