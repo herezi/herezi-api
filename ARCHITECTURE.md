@@ -22,8 +22,9 @@
 | `internal/domain` | 표준 라이브러리만 | 다른 모든 internal 패키지 |
 | `internal/store` | `domain` | 구현체(`memory`, `postgres`), `httpapi` |
 | `internal/store/memory`, `internal/store/postgres` | `domain`, `store` | `httpapi`, 서로 |
-| `internal/httpapi` | `domain`, `store`(인터페이스), `geo`(인터페이스·타입) | 구체 저장소, ingest 관련 패키지 |
+| `internal/httpapi` | `domain`, `store`(인터페이스), `geo`·`auth`(인터페이스·타입) | 구체 저장소, ingest 관련 패키지 |
 | `internal/geo` | `domain`, 표준 라이브러리 | `store`, `httpapi`, ingest 관련 패키지 |
+| `internal/auth` | 표준 라이브러리만 | 다른 모든 internal 패키지 |
 | `internal/snapshot` | `domain` | 나머지 internal |
 | `internal/config` | 표준 라이브러리만 | 나머지 internal |
 | `internal/ingest` | `domain`, `geo` | `store`·`httpapi`, 하위 `sources`·`openai` |
@@ -48,6 +49,18 @@
 - `internal/geo`: `ReverseGeocoder` 인터페이스, 네이버 클라이언트(`Naver`, 타임아웃 2초), 메모리 캐시(`Cache`, 좌표 소수 3자리 반올림·TTL 1일, 실패는 캐시 안 함).
 - `cmd/api`가 `NCP_MAPS_CLIENT_ID`/`NCP_MAPS_CLIENT_SECRET`이 있을 때만 `Cache(Naver)`를 `httpapi.WithGeocoder`로 꽂는다. 없으면 501.
 - 핸들러 테스트는 가짜 `ReverseGeocoder`, 네이버 클라이언트는 `httptest`로 요청·파싱을 검증한다.
+
+## 인증·저장: `/v1/me/*` (이슈 #56, TECH-PLAN §4.1)
+- 앱은 카카오·Apple → Supabase Auth 로그인 후 받은 access token을 `Authorization: Bearer <JWT>`로 보낸다. 조회 API는 인증 없이 그대로.
+- `internal/auth`: `Verifier` 인터페이스와 Supabase 구현(표준 라이브러리 crypto만). 프로젝트 JWKS(`<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, ES256/RS256)를
+  10분 캐시하고, 모르는 `kid`는 1분 간격으로 다시 받는다(받기 실패 시 이전 키 사용). `SUPABASE_JWT_SECRET`이 있으면 레거시 HS256도 받는다.
+  `iss`=`<SUPABASE_URL>/auth/v1`, `aud`∋`authenticated`, `exp`(30초 오차 허용), `sub`=UUID(사용자 ID), 익명 사용자 거절.
+- `httpapi.authed` 미들웨어: 설정 없음 → 503 `auth_not_configured`, 토큰 문제 → 401 `unauthorized`, JWKS 못 받음 → 503 `auth_unavailable`.
+  `/v1/me/*` 응답은 `Cache-Control: no-store`. 토큰·사용자 ID는 로그에 남기지 않는다.
+- 저장소: `store.SavedStore`(메모리·postgres, `storetest.RunSaved` 공통 스위트). 테이블 `saved_spots`(migrations/00007, PK(user_id, spot_id),
+  `spot_id` → `spots(id) ON DELETE CASCADE`). 수집 배치가 종료 후 90일 지난 볼거리를 정리하면 저장 행도 사라진다. 목록은 정리 전이라도
+  보존 기간(`domain.RetainEndedDays`)이 지난 항목을 뺀다. 사용자당 500개(`store.MaxSavedPerUser`) — 넘으면 409.
+- `cmd/api`가 `SUPABASE_URL`이 있을 때만 `httpapi.WithAuth`를 꽂는다. 핸들러 테스트는 가짜 `Verifier`, 검증기 테스트는 테스트용 키쌍 + 가짜 JWKS 서버.
 
 ## 계약과 테스트
 - `api/openapi.yaml`이 단일 기준. `internal/httpapi/contract_test.go`가 카테고리 enum, `when` enum, 라우트 목록, 응답 JSON 필드를 대조한다.

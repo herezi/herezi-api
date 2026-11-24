@@ -17,14 +17,18 @@ import (
 type Store struct {
 	mu    sync.RWMutex
 	spots map[string]domain.Spot
+	saved map[string]map[string]time.Time // user ID → spot ID → saved_at
 	now   func() time.Time
 }
 
-var _ store.SpotStore = (*Store)(nil)
+var (
+	_ store.SpotStore  = (*Store)(nil)
+	_ store.SavedStore = (*Store)(nil)
+)
 
 // New returns a store pre-filled with spots.
 func New(spots ...domain.Spot) *Store {
-	s := &Store{spots: make(map[string]domain.Spot), now: time.Now}
+	s := &Store{spots: make(map[string]domain.Spot), saved: make(map[string]map[string]time.Time), now: time.Now}
 	for _, sp := range spots {
 		_ = s.UpsertSpot(context.Background(), sp)
 	}
@@ -50,7 +54,7 @@ func (s *Store) PruneEnded(_ context.Context, before time.Time) (int, error) {
 	n := 0
 	for id, sp := range s.spots {
 		if sp.Ended(before) {
-			delete(s.spots, id)
+			s.deleteSpotLocked(id)
 			n++
 		}
 	}
@@ -64,11 +68,19 @@ func (s *Store) DeleteSpots(_ context.Context, ids []string) (int, error) {
 	n := 0
 	for _, id := range ids {
 		if _, ok := s.spots[id]; ok {
-			delete(s.spots, id)
+			s.deleteSpotLocked(id)
 			n++
 		}
 	}
 	return n, nil
+}
+
+// deleteSpotLocked는 spot과 그 spot의 저장 행을 지운다(postgres의 ON DELETE CASCADE와 같음).
+func (s *Store) deleteSpotLocked(id string) {
+	delete(s.spots, id)
+	for _, m := range s.saved {
+		delete(m, id)
+	}
 }
 
 // SpotByID returns store.ErrNotFound when missing. Ended spots are returned.

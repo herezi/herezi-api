@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.4 (2026-11-24) |
+| 버전 | v1.5 (2026-11-24) |
 | 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.0, [DATA-PLAN.md](DATA-PLAN.md) |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
@@ -78,7 +78,8 @@
 | 로그인 | 카카오, Apple (필수 둘 다). 앱이 각 SDK로 로그인 → **Supabase Auth**에 ID 토큰으로 로그인(`signInWithIdToken`, provider kakao/apple) → Supabase 세션(JWT) |
 | API 인증 | `Authorization: Bearer <Supabase JWT>`. API는 Supabase JWKS로 서명·만료 검증, `sub`=user_id. 조회 API는 인증 불필요 |
 | 저장 테이블 | `saved_spots(user_id uuid, spot_id text, saved_at timestamptz, PK(user_id, spot_id))` + RLS(본인 행만). API는 서비스 역할로 접근 |
-| 엔드포인트 | `GET /v1/me/saved`(스팟 스냅샷 포함, 끝난 항목 `is_ended`), `PUT /v1/me/saved/{spot_id}`, `DELETE /v1/me/saved/{spot_id}`, `DELETE /v1/me`(회원 탈퇴: 저장 삭제 + Supabase 사용자 삭제) |
+| 엔드포인트 | `GET /v1/me/saved`(스팟 스냅샷 포함, 끝난 항목 `is_ended`, 저장 최신순, 커서 페이지), `PUT /v1/me/saved/{spot_id}`(멱등, 없는 볼거리 404), `DELETE /v1/me/saved/{spot_id}`(멱등), `POST /v1/me/saved:import`(로컬 저장분 일괄 이전, 최대 200개), `DELETE /v1/me`(회원 탈퇴: 저장 삭제 + Supabase 사용자 삭제). 사용자당 최대 500개 |
+| 서버 설정 | `SUPABASE_URL`(JWKS 검증, 없으면 `/v1/me/*` 503), 선택 `SUPABASE_JWT_SECRET`(레거시 HS256). 저장 행은 `spots` FK `ON DELETE CASCADE` — 볼거리가 정리되면 저장 목록에서도 사라짐 |
 | 기기 로컬 저장 | 로그인 전 저장 시도는 로그인 시트를 띄움. 기존 로컬 저장분은 첫 로그인 때 계정으로 옮기고 로컬 삭제 |
 | 끝난 볼거리 | 종료 후 90일 보존(상세·저장 목록에서 '종료됨'), 이후 정리. 저장 목록에서도 사라짐 |
 | 앱스토어 | 앱 안 회원 탈퇴 필수, Apple 로그인 필수(소셜 로그인 제공 시). Apple Developer 계정 필요 |
@@ -92,7 +93,7 @@
 | 배치 | Railway 서비스 `ingest` (cron `0 20 * * *` UTC = 매일 05:00 KST) | `cmd/ingest -max-gpt 100` 하루 1회 실행 후 종료. 매일 DB에 쓰므로 Supabase 비활성 일시정지도 막는다 |
 | DB | **Supabase 무료** — 조직 `herezi`, 프로젝트 `herezi`, `ap-southeast-1`(싱가포르), PostGIS·pg_trgm | 관리형 Postgres. API와 같은 리전이라 지연이 짧다. 접속은 **session pooler**(IPv4, 5432) |
 | DB 노출 차단 | public 테이블 RLS + `anon`·`authenticated` 권한 회수 (마이그레이션 00005) | 앱은 DB에 직접 붙지 않고 `cmd/api`만 쓴다. Supabase Data API로 테이블이 열리지 않게 막는다 |
-| 비밀값 | Railway 서비스 변수 | `DATABASE_URL`, `NCP_MAPS_CLIENT_ID/SECRET`, `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY`, `KAKAO_REST_API_KEY`. 로컬은 `.env`(gitignore) |
+| 비밀값 | Railway 서비스 변수 | `DATABASE_URL`, `NCP_MAPS_CLIENT_ID/SECRET`, `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY`, `KAKAO_REST_API_KEY`, `SUPABASE_URL`(+선택 `SUPABASE_JWT_SECRET`). 로컬은 `.env`(gitignore) |
 | 이미지 | 원본 URL 사용(M1) | 저장·가공은 M2에서 필요 시 |
 | 모니터링 | Railway 로그 + 수집 결과 요약 로그(리포트 표) | 수집 0건·급감은 로그로 확인(알림은 M2) |
 
@@ -145,3 +146,4 @@
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
 | 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
 | 2026-11-24 | v1.4 | §5 인프라: GCP → Railway(API·수집 cron, 싱가포르) + Supabase 무료(조직·프로젝트 herezi, ap-southeast-1, session pooler), RLS·권한 회수(00005), 월 비용 추정, 7일 비활성 일시정지 메모 ([ADR 0003](../adr/0003-railway-supabase.md)) |
+| 2026-11-24 | v1.5 | §4.1 구현 세부(이슈 #56): `POST /v1/me/saved:import`, 사용자당 500개, 서버 설정(`SUPABASE_URL`·선택 `SUPABASE_JWT_SECRET`), 저장 행 CASCADE 정리 |

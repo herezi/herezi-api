@@ -7,8 +7,8 @@ import (
 )
 
 // DefaultRetainEndedDays는 끝난 볼거리를 보존하는 기간(일). 이 기간 동안은 상세·저장 목록에서
-// '종료됨'으로 보여 주고, 지나면 정리한다(DATA-PLAN.md Q1, 이슈 #51).
-const DefaultRetainEndedDays = 90
+// '종료됨'으로 보여 주고, 지나면 정리한다(DATA-PLAN.md Q1, 이슈 #51). 기준값은 domain.RetainEndedDays.
+const DefaultRetainEndedDays = domain.RetainEndedDays
 
 // RetainCutoff는 보존 기준 시각. ends_at이 이보다 이르면 보존 기간이 지난 것이다.
 // days가 0 이하면 now(끝난 항목은 모두 버림).

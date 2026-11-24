@@ -89,3 +89,50 @@ type SpotStore interface {
 	SpotReader
 	SpotWriter
 }
+
+// 저장(찜) — 로그인한 사용자별 저장 목록(TECH-PLAN.md §4.1, 이슈 #56).
+
+// MaxSavedPerUser는 사용자 한 명이 저장할 수 있는 최대 개수.
+const MaxSavedPerUser = 500
+
+// ErrSavedLimit는 저장하면 MaxSavedPerUser를 넘을 때.
+var ErrSavedLimit = errors.New("store: saved limit exceeded")
+
+// SavedSpot은 저장 목록의 한 항목(스팟 스냅샷 + 저장 시각).
+type SavedSpot struct {
+	Spot    domain.Spot
+	SavedAt time.Time
+}
+
+// SavedQuery는 사용자의 저장 목록을 저장 시각 최신순(같으면 spot ID순)으로 고른다.
+//
+// HideEndedBefore가 0이 아니면 ends_at < HideEndedBefore인 항목(종료 후 보존 기간이 지남)은 뺀다.
+// 보통은 수집 배치의 PruneEnded가 spots 행을 지울 때 저장 행도 함께 지워지지만(FK ON DELETE CASCADE),
+// 정리가 늦어도 목록에 나오지 않게 한다.
+type SavedQuery struct {
+	UserID          string
+	HideEndedBefore time.Time
+	Offset          int
+	Limit           int
+}
+
+// ImportResult는 ImportSaved 결과.
+type ImportResult struct {
+	Imported       int // 새로 저장한 수(이미 저장돼 있던 항목은 세지 않음)
+	SkippedUnknown int // 서버에 없는(정리됐거나 잘못된) spot ID 수
+}
+
+// SavedStore는 저장 목록 저장소. userID는 Supabase 사용자 ID(UUID 소문자)다.
+type SavedStore interface {
+	// SaveSpot은 멱등이다: 이미 저장돼 있으면 saved_at을 바꾸지 않고 nil.
+	// spot이 없으면 ErrNotFound, 개수 한도를 넘으면 ErrSavedLimit.
+	SaveSpot(ctx context.Context, userID, spotID string, at time.Time) error
+	// UnsaveSpot은 멱등이다: 저장돼 있지 않아도 nil.
+	UnsaveSpot(ctx context.Context, userID, spotID string) error
+	SavedSpots(ctx context.Context, q SavedQuery) ([]SavedSpot, error)
+	// ImportSaved는 여러 spot을 한 번에 저장한다(로그인 전 기기 로컬 저장분 이전).
+	// 없는 spot은 건너뛰고 센다. 한도를 넘으면 아무것도 저장하지 않고 ErrSavedLimit.
+	ImportSaved(ctx context.Context, userID string, spotIDs []string, at time.Time) (ImportResult, error)
+	// DeleteUserSaved는 사용자의 저장 행을 모두 지운다(회원 탈퇴).
+	DeleteUserSaved(ctx context.Context, userID string) (int, error)
+}

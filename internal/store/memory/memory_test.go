@@ -11,3 +11,7 @@ import (
 func TestStore(t *testing.T) {
 	storetest.Run(t, func(*testing.T) store.SpotStore { return memory.New() })
 }
+
+func TestSaved(t *testing.T) {
+	storetest.RunSaved(t, func(*testing.T) storetest.SavedSpotStore { return memory.New() })
+}

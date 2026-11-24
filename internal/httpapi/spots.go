@@ -53,6 +53,7 @@ type spotJSON struct {
 	FetchedAt time.Time       `json:"fetched_at"`
 	DistanceM *int            `json:"distance_m,omitempty"`
 	IsEnded   bool            `json:"is_ended"`
+	SavedAt   *time.Time      `json:"saved_at,omitempty"` // /v1/me/saved에서만
 }
 
 // spotPageJSON is components.schemas.SpotPage.

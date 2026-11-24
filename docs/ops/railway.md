@@ -24,6 +24,8 @@
 | `KAKAO_REST_API_KEY` | ✓ | ✓ (장소명 검색) |
 | `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY` | ✓ (미사용) | ✓ |
 | `MIGRATE_ON_START=1` | ✓ (시작 시 goose 마이그레이션) | — |
+| `SUPABASE_URL` | ✓ (로그인 토큰 JWKS 검증, 없으면 `/v1/me/*` 503) | — |
+| `SUPABASE_JWT_SECRET` | 선택 (레거시 HS256 토큰도 받을 때만) | — |
 
 `PORT`는 Railway가 넣는다(api는 `$PORT`를 리슨, 기본 8080).
 
