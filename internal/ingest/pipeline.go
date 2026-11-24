@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -29,7 +30,9 @@ const (
 type Pipeline struct {
 	Sources  []Source
 	Geocoder geo.Geocoder // nil이면 좌표 없는 항목은 장소명 색인으로만 보강
-	Enricher Enricher     // nil이면 GPT 없이(규칙 결과만)
+	// Places는 장소명(POI) 검색(카카오 키워드). 네이버가 못 찾은 항목에만 쓴다. nil이면 안 씀.
+	Places   geo.PlaceSearcher
+	Enricher Enricher // nil이면 GPT 없이(규칙 결과만)
 	// Prior는 이전 결과(content_hash → Spot). 해시가 같으면 요약·분류·무료를 재사용한다.
 	Prior map[string]domain.Spot
 	// PriorExcluded는 이전에 GPT가 볼거리 아님으로 판정한 항목(content_hash → 사유). 다시 묻지 않는다.
@@ -50,6 +53,7 @@ type SourceReport struct {
 	Dropped     map[string]int
 	Geocoded    int // 네이버 지오코딩으로 좌표를 얻은 수
 	PlaceIndex  int // 다른 항목의 같은 장소명 좌표를 빌린 수
+	PlaceSearch int // 카카오 키워드 검색으로 좌표를 얻은 수
 	DupesMerged int // 다른 항목에 합쳐져 빠진 수
 	CacheHits   int // 해시 캐시로 GPT를 건너뛴 수
 	Enriched    int // 이번 실행에서 GPT로 요약을 얻은 수
@@ -62,6 +66,7 @@ type Report struct {
 	GPTItems         int
 	GPTErrors        int
 	GeocodeCalls     int
+	PlaceCalls       int // 카카오 키워드 검색 호출 수(캐시 제외)
 	PromptTokens     int
 	CompletionTokens int
 	Total            int
@@ -212,7 +217,8 @@ func placeKey(gu, place string) string {
 }
 
 // fillCoords는 좌표 없는 항목에 좌표를 채운다: ① 같은 구·같은 장소명을 가진 다른 항목의 좌표
-// ② 네이버 Geocoding(주소, 없으면 "서울특별시 구 장소명"). 질의 결과는 실행 동안 캐시한다.
+// ② 네이버 Geocoding(주소, 없으면 "서울특별시 구 장소명") ③ 카카오 키워드 검색("장소명 구", 서울 범위,
+// 이름 유사도 확인). 질의 결과는 실행 동안 캐시하고, 찾은 좌표는 장소명 색인에 넣어 같은 장소에 재사용한다.
 // 반환값 i번째는 recs[i] 좌표가 원본이 아닌지.
 func (p *Pipeline) fillCoords(ctx context.Context, recs []Record, _ time.Time, byName map[string]*SourceReport, rep *Report) []bool {
 	geocoded := make([]bool, len(recs))
@@ -225,42 +231,151 @@ func (p *Pipeline) fillCoords(ctx context.Context, recs []Record, _ time.Time, b
 		}
 	}
 	cache := map[string]geo.Point{}
+	placeCache := map[string]geo.Point{}
 	for i := range recs {
 		r := &recs[i]
 		if r.HasCoords() {
 			continue
 		}
 		sr := byName[r.Spot.Source]
-		if c, ok := index[placeKey(r.Gu, r.Spot.PlaceName)]; ok {
+		key := placeKey(r.Gu, r.Spot.PlaceName)
+		if c, ok := index[key]; ok && key != "" {
 			r.Spot.Lat, r.Spot.Lng = c[0], c[1]
 			geocoded[i] = true
 			sr.PlaceIndex++
 			continue
 		}
-		if p.Geocoder == nil {
+		if pt, ok := p.geocode(ctx, *r, cache, rep); ok {
+			r.Spot.Lat, r.Spot.Lng = pt.Lat, pt.Lng
+			sr.Geocoded++
+		} else if pt, ok := p.searchPlace(ctx, *r, placeCache, rep); ok {
+			r.Spot.Lat, r.Spot.Lng = pt.Lat, pt.Lng
+			sr.PlaceSearch++
+		} else {
 			continue
 		}
-		for _, q := range geocodeQueries(*r) {
-			pt, ok := cache[q]
-			if !ok {
-				var err error
-				rep.GeocodeCalls++
-				pt, err = p.Geocoder.Geocode(ctx, q)
-				if err != nil {
-					p.log().Warn("ingest: geocode failed", "source", r.Spot.Source, "err", err)
-					continue
-				}
-				cache[q] = pt
-			}
-			if pt.OK && InSeoul(pt.Lat, pt.Lng) {
-				r.Spot.Lat, r.Spot.Lng = pt.Lat, pt.Lng
-				geocoded[i] = true
-				sr.Geocoded++
-				break
-			}
+		geocoded[i] = true
+		if key != "" {
+			index[key] = [2]float64{r.Spot.Lat, r.Spot.Lng}
 		}
 	}
 	return geocoded
+}
+
+// geocode는 네이버 Geocoding으로 주소(또는 "서울특별시 구 장소명")를 찾는다.
+func (p *Pipeline) geocode(ctx context.Context, r Record, cache map[string]geo.Point, rep *Report) (geo.Point, bool) {
+	if p.Geocoder == nil {
+		return geo.Point{}, false
+	}
+	for _, q := range geocodeQueries(r) {
+		pt, ok := cache[q]
+		if !ok {
+			var err error
+			rep.GeocodeCalls++
+			pt, err = p.Geocoder.Geocode(ctx, q)
+			if err != nil {
+				p.log().Warn("ingest: geocode failed", "source", r.Spot.Source, "err", err)
+				continue
+			}
+			cache[q] = pt
+		}
+		if pt.OK && InSeoul(pt.Lat, pt.Lng) {
+			return pt, true
+		}
+	}
+	return geo.Point{}, false
+}
+
+// searchPlace는 카카오 키워드 검색으로 "장소명 구"를 찾는다. 서울 안이고 이름이 비슷한 첫 후보만 쓴다.
+// 장소명이 "코엑스 2층 아셈볼룸"처럼 세부 공간까지 있으면 못 찾으므로 뒤 단어를 하나씩 줄여 다시 찾는다.
+func (p *Pipeline) searchPlace(ctx context.Context, r Record, cache map[string]geo.Point, rep *Report) (geo.Point, bool) {
+	if p.Places == nil {
+		return geo.Point{}, false
+	}
+	for _, name := range placeNames(r.Spot.PlaceName) {
+		q := strings.TrimSpace(name + " " + r.Gu)
+		pt, ok := cache[q]
+		if !ok {
+			rep.PlaceCalls++
+			cands, err := p.Places.SearchPlace(ctx, q)
+			if err != nil {
+				p.log().Warn("ingest: place search failed", "source", r.Spot.Source, "err", err)
+				return geo.Point{}, false // 실패는 캐시하지 않는다
+			}
+			for _, c := range cands {
+				if InSeoul(c.Lat, c.Lng) && SimilarPlaceName(name, c.Name) {
+					pt = geo.Point{Lat: c.Lat, Lng: c.Lng, OK: true}
+					break
+				}
+			}
+			cache[q] = pt
+		}
+		if pt.OK {
+			return pt, true
+		}
+	}
+	return geo.Point{}, false
+}
+
+var (
+	parenRe      = regexp.MustCompile(`\([^()]*\)|\[[^\[\]]*\]`)
+	placeNoiseRe = regexp.MustCompile(`^(서울특별시|서울시|서울)\s+|\s+(등|일대|일원|외|및)$`)
+)
+
+// placeNames는 카카오 검색에 쓸 장소명 후보(긴 것부터, 최대 3개). 괄호·"등"·"일대"를 빼고
+// 뒤 단어를 하나씩 줄인다. 3글자(공백·기호 제외) 미만은 쓰지 않는다.
+func placeNames(place string) []string {
+	s := CleanText(place)
+	for range 2 {
+		s = parenRe.ReplaceAllString(s, " ")
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	for {
+		t := strings.TrimSpace(placeNoiseRe.ReplaceAllString(s, ""))
+		if t == s {
+			break
+		}
+		s = t
+	}
+	words := strings.Fields(s)
+	var out []string
+	for n := len(words); n > 0 && len(out) < 3; n-- {
+		name := strings.Join(words[:n], " ")
+		if len([]rune(keep(name))) >= 3 {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// SimilarPlaceName은 수집한 장소명과 검색 결과 장소명이 같은 곳을 가리키는지 본다.
+// 공백·기호를 뺀 소문자로 비교해 한쪽이 다른 쪽을 포함하거나(짧은 쪽 3글자 이상),
+// 글자 bigram Dice 계수가 0.5 이상이면 비슷하다고 본다.
+func SimilarPlaceName(want, got string) bool {
+	a, b := []rune(keep(strings.ToLower(CleanText(want)))), []rune(keep(strings.ToLower(CleanText(got))))
+	if len(a) < 2 || len(b) < 2 {
+		return false
+	}
+	sa, sb := string(a), string(b)
+	if sa == sb {
+		return true
+	}
+	if min(len(a), len(b)) >= 3 && (strings.Contains(sa, sb) || strings.Contains(sb, sa)) {
+		return true
+	}
+	grams := map[string]int{}
+	for i := 0; i+1 < len(a); i++ {
+		grams[string(a[i:i+2])]++
+	}
+	common := 0
+	for i := 0; i+1 < len(b); i++ {
+		g := string(b[i : i+2])
+		if grams[g] > 0 {
+			grams[g]--
+			common++
+		}
+	}
+	return float64(2*common)/float64(len(a)-1+len(b)-1) >= 0.5
 }
 
 func geocodeQueries(r Record) []string {
@@ -445,15 +560,15 @@ func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]
 // String은 사람이 읽는 실행 리포트(표). 키·좌표는 들어가지 않는다.
 func (r Report) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-18s %7s %6s %7s %7s %6s %7s %6s  %s\n",
-		"source", "fetched", "kept", "geocode", "placeix", "dupes", "cached", "gpt", "dropped")
+	fmt.Fprintf(&b, "%-18s %7s %6s %7s %7s %6s %6s %7s %6s  %s\n",
+		"source", "fetched", "kept", "geocode", "placeix", "kakao", "dupes", "cached", "gpt", "dropped")
 	for _, s := range r.Sources {
 		var dropped []string
 		for _, k := range slices.Sorted(maps.Keys(s.Dropped)) {
 			dropped = append(dropped, fmt.Sprintf("%s=%d", k, s.Dropped[k]))
 		}
-		fmt.Fprintf(&b, "%-18s %7d %6d %7d %7d %6d %7d %6d  %s\n",
-			s.Source, s.Fetched, s.Kept, s.Geocoded, s.PlaceIndex, s.DupesMerged, s.CacheHits, s.Enriched, strings.Join(dropped, " "))
+		fmt.Fprintf(&b, "%-18s %7d %6d %7d %7d %6d %6d %7d %6d  %s\n",
+			s.Source, s.Fetched, s.Kept, s.Geocoded, s.PlaceIndex, s.PlaceSearch, s.DupesMerged, s.CacheHits, s.Enriched, strings.Join(dropped, " "))
 		if s.Error != "" {
 			fmt.Fprintf(&b, "  error: %s\n", s.Error)
 		}
@@ -467,7 +582,7 @@ func (r Report) String() string {
 		drops = append(drops, fmt.Sprintf("%s=%d", k, totals[k]))
 	}
 	fmt.Fprintf(&b, "dropped: %s\ncategories: %s\n", strings.Join(drops, " "), strings.Join(cats, " "))
-	fmt.Fprintf(&b, "total kept=%d  geocode_calls=%d  gpt_calls=%d (errors %d) gpt_items=%d  tokens in=%d out=%d\n",
-		r.Total, r.GeocodeCalls, r.GPTCalls, r.GPTErrors, r.GPTItems, r.PromptTokens, r.CompletionTokens)
+	fmt.Fprintf(&b, "total kept=%d  geocode_calls=%d  place_calls=%d  gpt_calls=%d (errors %d) gpt_items=%d  tokens in=%d out=%d\n",
+		r.Total, r.GeocodeCalls, r.PlaceCalls, r.GPTCalls, r.GPTErrors, r.GPTItems, r.PromptTokens, r.CompletionTokens)
 	return b.String()
 }

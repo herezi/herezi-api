@@ -1,13 +1,13 @@
 // Command ingest는 공공데이터 수집 배치다(DATA-PLAN.md §6, 이슈 #42).
 //
-//	수집(소스별) → 정규화 → 필터(끝남·서울 밖) → 좌표 보강(장소명 색인·네이버 Geocoding)
+//	수집(소스별) → 정규화 → 필터(끝남·서울 밖) → 좌표 보강(장소명 색인·네이버 Geocoding·카카오 키워드)
 //	→ 중복 제거 → GPT 보강(요약·애매한 분류·애매한 무료, 해시 캐시·호출 상한) → 저장
 //
 // 저장: DATABASE_URL이 있으면 PostGIS에 upsert(GORM), 없으면 -out JSON 스냅샷.
 // cmd/api는 DATABASE_URL 없이 SNAPSHOT_PATH로 스냅샷을 메모리 저장소에 올린다.
 //
 // 환경 변수(로컬은 .env): SEOUL_OPENAPI_KEY, DATA_GO_KR_SERVICE_KEY, OPENAI_API_KEY,
-// NCP_MAPS_CLIENT_ID/NCP_MAPS_CLIENT_SECRET, DATABASE_URL(선택). 값은 출력하지 않는다.
+// NCP_MAPS_CLIENT_ID/NCP_MAPS_CLIENT_SECRET, KAKAO_REST_API_KEY(선택), DATABASE_URL(선택). 값은 출력하지 않는다.
 //
 // GPT가 볼거리 아님으로 판정한 항목은 스냅샷에 없으므로 -excluded-cache(JSON)에 content_hash를 남겨
 // 다음 실행에 다시 묻지 않는다.
@@ -81,6 +81,11 @@ func run(log *slog.Logger) error {
 		p.Geocoder = geo.NewNaverGeocoder(id, secret)
 	} else {
 		log.Warn("geocoder disabled (NCP_MAPS_CLIENT_ID/SECRET not set)")
+	}
+	if key := os.Getenv("KAKAO_REST_API_KEY"); key != "" {
+		p.Places = geo.NewKakaoPlaces(key)
+	} else {
+		log.Warn("kakao place search disabled (KAKAO_REST_API_KEY not set)")
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" && *maxGPT > 0 {
 		c := openai.New(key)
