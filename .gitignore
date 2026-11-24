@@ -12,3 +12,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# 수집 스냅샷(로컬, cmd/ingest -out)
+/data/

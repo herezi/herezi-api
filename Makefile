@@ -4,7 +4,7 @@ STATICCHECK_VERSION := v0.7.0
 # go.mod의 Go 버전을 그대로 쓴다(도구 때문에 다른 툴체인을 내려받지 않음).
 export GOTOOLCHAIN := local
 
-.PHONY: check fmt vet lint test test-integration run tidy
+.PHONY: check fmt vet lint test test-integration run ingest tidy
 
 ## check: 포맷·vet·staticcheck·테스트. PR 전에 반드시 통과해야 한다.
 check: fmt vet lint test
@@ -35,6 +35,10 @@ test-integration:
 ## run: API 서버 실행. DATABASE_URL이 없으면 예시 데이터 메모리 저장소.
 run:
 	go run ./cmd/api
+
+## ingest: 수집 배치 1회. DATABASE_URL이 없으면 data/snapshot.json에 쓴다(SNAPSHOT_PATH로 api에 올림).
+ingest:
+	go run ./cmd/ingest -out data/snapshot.json
 
 ## tidy: go mod tidy
 tidy:

@@ -1,4 +1,5 @@
-package main
+// Package config는 실행 파일(cmd/*)이 공유하는 설정 도우미다.
+package config
 
 import (
 	"bufio"
@@ -8,10 +9,10 @@ import (
 	"strings"
 )
 
-// loadDotEnv는 로컬 개발용으로 path(.env)의 KEY=VALUE를 환경 변수로 올린다.
+// LoadDotEnv는 로컬 개발용으로 path(.env)의 KEY=VALUE를 환경 변수로 올린다.
 // 이미 설정된 변수는 덮어쓰지 않고, 파일이 없으면 아무것도 하지 않는다.
 // 값은 절대 로그에 남기지 않는다. 운영은 Secret Manager → 환경 변수.
-func loadDotEnv(path string) (loaded int, err error) {
+func LoadDotEnv(path string) (loaded int, err error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil

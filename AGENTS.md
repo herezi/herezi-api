@@ -5,7 +5,7 @@
 ## 이 레포는
 Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
 - `cmd/api`: 읽기 전용 공개 REST API. 앱(iOS·Android)은 위치·필터로 근처 항목을 조회만 한다.
-- `cmd/ingest`: 공공데이터 수집 배치(수집 → 정규화 → 지오코딩 → GPT 보강 → 중복 제거 → 저장). 지금은 스텁.
+- `cmd/ingest`: 공공데이터 수집 배치(수집 → 정규화 → 지오코딩 → 중복 제거 → GPT 보강 → 저장). DB가 없으면 JSON 스냅샷(`data/snapshot.json`, gitignore).
 - `api/openapi.yaml`: 서버·iOS·Android 사이 API 계약의 **단일 기준**.
 
 ## 먼저 읽을 문서
@@ -24,14 +24,17 @@ Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
 ```
 api/openapi.yaml            API 계약 (단일 기준)
 cmd/api/                    API 서버 진입점 (환경 변수 → 저장소 선택 → HTTP)
-cmd/ingest/                 수집 배치 진입점 (스텁)
+cmd/ingest/                 수집 배치 진입점 (-sources, -max-gpt, -out, -dry-run)
 internal/domain/            핵심 타입·규칙 (Spot, Category, When, 거리). 다른 internal 패키지 import 금지
 internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, NearbyQuery)
 internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 때) + 서울 예시 데이터
 internal/store/postgres/    PostGIS 저장소 (GORM, 공간 조건은 raw 표현식)
 internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
-internal/geo/               역지오코딩 인터페이스·네이버 클라이언트·메모리 캐시
+internal/geo/               역지오코딩·지오코딩 인터페이스, 네이버 클라이언트, 메모리 캐시
+internal/ingest/            수집 파이프라인(필터·지오코딩·중복 제거·GPT 보강), sources/(소스별 수집기), openai/(GPT 배치)
+internal/snapshot/          수집 결과 JSON 스냅샷 읽기·쓰기
+internal/config/            .env 로더 (cmd 공용)
 migrations/                 goose SQL 마이그레이션 (embed)
 docs/product/               기획 문서
 docs/design/                디자인 시스템·화면 스펙·목업 (두 앱 공통)
@@ -42,7 +45,8 @@ docs/adr/                   ADR (NNNN-제목.md)
 | 명령 | 설명 |
 |---|---|
 | `make check` | gofmt·go vet·staticcheck·go test. **PR 전에 반드시 통과** (CI도 같은 명령) |
-| `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소, 로컬 `.env`가 있으면 읽음) |
+| `make run` | API 서버 실행 (`PORT` 기본 8080, `DATABASE_URL` 없으면 메모리 저장소 — `SNAPSHOT_PATH`가 있으면 그 스냅샷, 없으면 예시 데이터. 로컬 `.env`가 있으면 읽음) |
+| `make ingest` | 수집 배치 1회 (`go run ./cmd/ingest -out data/snapshot.json`). 키는 `.env`. GPT는 월 한도 공유라 `-max-gpt`로 요청 수를 제한 |
 | `make test` | 단위·핸들러 테스트만 (DB 불필요) |
 | `make test-integration` | PostGIS 통합 테스트. `HEREZI_TEST_DATABASE_URL`(버려도 되는 DB) 필요. CI에서는 서비스 컨테이너로 실행 |
 

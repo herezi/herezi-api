@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.0 |
+| 버전 | v1.1 (2026-11-24 KOPIS 보류·§9.1 실측) |
 | 날짜 | 2026-11-20 |
 | 상위 문서 | [`SERVICE-PLAN.md`](SERVICE-PLAN.md) v1.0 (승인), [`PRODUCT.md`](PRODUCT.md), [`api/openapi.yaml`](../../api/openapi.yaml) `Spot` |
 | 다음 단계 | M0 실측(§9, 이슈 #6) → M1 수집기 |
@@ -22,8 +22,8 @@
 ## 2. 결론 요약
 | 판정 | 소스 |
 |---|---|
-| **사용 (M1 수집기)** | ① 서울시 문화행사 정보 ② TourAPI 행사정보 ③ KOPIS 공연 ④ 서울시 공공서비스예약(문화행사·교육) |
-| **사용 (보조)** | ⑤ 문화포털 한눈에보는문화정보 (중복률 실측 후 유지 여부 결정) |
+| **사용 (M1 수집기)** | ① 서울시 문화행사 정보 ② TourAPI 행사정보 ④ 서울시 공공서비스예약(문화행사·교육) ⑤ 문화포털 한눈에보는문화정보 — 이슈 #42에서 구현 |
+| **보류** (기관 서류 필요, 사업자 등록 후) | ③ KOPIS 공연 — 공연은 ① 서울 문화행사 + ⑤ 문화포털로 채운다 (2026-11-24 결정) |
 | **사용 (수동 큐레이션)** | ⑥ 자연·계절: 명소 목록은 운영자가 만들고, 개화·단풍 시기는 기상청·산림청 발표를 수동 입력 |
 | **보류** | 팝업 (공공 소스 없음 → 제휴 협의), 프로스포츠 일정 (라이선스 미확인), 서울 실시간 도시데이터 |
 | **제외** | 인스타그램·팝업 앱·포털 크롤링, 푸드트럭 위치(공공 데이터 없음), 가로수 위치정보 |
@@ -37,7 +37,7 @@
 |---|---|---|---|---|---|---|---|---|---|
 | ① | [서울시 문화행사 정보](https://data.seoul.go.kr/dataList/OA-15486/S/1/datasetView.do) (`culturalEventInfo`, 원천: 서울문화포털) | performance, exhibition, festival, family + GPT 재분류 | `TITLE`, `CODENAME`(분류), `GUNAME`, `PLACE`, `STRTDATE`, `END_DATE`, `PRO_TIME`, `USE_FEE`, `IS_FREE`(유료/무료), `USE_TRGT`, `MAIN_IMG`, `HMPG_ADDR`, `ORG_LINK`, `RGSTDATE` | **있음** `LAT`=위도(37.x), `LOT`=경도(127.x) — 샘플 호출로 확인 | 매일 1회 (확인) | 1회 요청 최대 1,000건 ([이용안내](https://data.seoul.go.kr/together/guide/useGuide.do)). 일일 한도 **미확인** | **공공누리 1유형** (출처표시, 상업적 이용·변경 가능) — 확인 | 열린데이터광장 회원가입 → 일반 인증키 (샘플키는 5건까지) | **사용** (1순위) |
 | ② | [TourAPI 국문 관광정보 서비스_GW](https://www.data.go.kr/data/15101578/openapi.do) `KorService2` — `searchFestival2`, `locationBasedList2`, `detailCommon2`, `detailIntro2` | festival (+ GPT로 food·pet·sports 재분류) | `contentid`, `title`, `addr1/2`, `eventstartdate`, `eventenddate`(YYYYMMDD), `firstimage`/`firstimage2`, `cpyrhtDivCd`, `lDongRegnCd`/`lDongSignguCd`, `progresstype`(취소·연기), `modifiedtime`, `tel` | **있음** `mapx`=경도, `mapy`=위도 (WGS84, swagger 확인) | 실시간 (확인) | 개발계정 **1,000/일**, 운영계정은 활용사례 등록 후 증설 신청 (확인) | 이용허락범위 "제한 없음". **이미지는 공공누리 1유형·3유형 혼재** → `cpyrhtDivCd`로 구분, 3유형은 변경 금지(크롭·필터 금지) + 출처 표시 (확인) | data.go.kr 활용신청: 개발 자동승인 / 운영 심의승인 (확인) | **사용** |
-| ③ | [KOPIS 공연예술통합전산망](https://www.kopis.or.kr/por/cs/openapi/openApiInfo.do?menuId=MNU_00074) — `pblprfr`(목록·상세), `prfplc`(시설 상세), `prffest`(공연축제) | performance (아동공연 `kidstate=Y` → family) | 목록: `mt20id`, `prfnm`, `genrenm`, `prfstate`, `prfpdfrom`, `prfpdto`, `poster`, `fcltynm`, `openrun`. 상세: `mt10id`, `pcseguidance`(가격), `dtguidance`(시간), `child`, `festival`, `updatedate`, `relates`(예매처). 요청: `stdate`/`eddate`, `signgucode=11`(서울), `prfstate=02`(공연중) | **간접** — 공연엔 없음, `prfplc/{mt10id}`의 `la`(위도)/`lo`(경도)로 조인 ([가이드 v3.7](https://www.data.go.kr/data/15097844/openapi.do) 확인) | 실시간 (data.go.kr 표기) | **미확인** (공식 수치 없음, data.go.kr: "기관 정책에 따라 상이"). 2차 자료: 초당 10회 이상 시 서비스 중지, 목록 `rows` 최대 100·조회 기간 최대 31일 | data.go.kr 표기 "제한 없음". 출처 문구 "(재)예술경영지원센터 공연예술통합전산망(www.kopis.or.kr)" — **미확인**(2차 자료) | KOPIS 사이트에서 키 발급 (`service` 파라미터) — 절차 **미확인** | **사용** |
+| ③ | [KOPIS 공연예술통합전산망](https://www.kopis.or.kr/por/cs/openapi/openApiInfo.do?menuId=MNU_00074) — `pblprfr`(목록·상세), `prfplc`(시설 상세), `prffest`(공연축제) | performance (아동공연 `kidstate=Y` → family) | 목록: `mt20id`, `prfnm`, `genrenm`, `prfstate`, `prfpdfrom`, `prfpdto`, `poster`, `fcltynm`, `openrun`. 상세: `mt10id`, `pcseguidance`(가격), `dtguidance`(시간), `child`, `festival`, `updatedate`, `relates`(예매처). 요청: `stdate`/`eddate`, `signgucode=11`(서울), `prfstate=02`(공연중) | **간접** — 공연엔 없음, `prfplc/{mt10id}`의 `la`(위도)/`lo`(경도)로 조인 ([가이드 v3.7](https://www.data.go.kr/data/15097844/openapi.do) 확인) | 실시간 (data.go.kr 표기) | **미확인** (공식 수치 없음, data.go.kr: "기관 정책에 따라 상이"). 2차 자료: 초당 10회 이상 시 서비스 중지, 목록 `rows` 최대 100·조회 기간 최대 31일 | data.go.kr 표기 "제한 없음". 출처 문구 "(재)예술경영지원센터 공연예술통합전산망(www.kopis.or.kr)" — **미확인**(2차 자료) | KOPIS 사이트에서 키 발급 (`service` 파라미터) — 기관 서류가 필요 | **보류** (기관 서류 필요, 사업자 등록 후). 공연 커버리지는 ①·⑤로 |
 | ④ | 서울시 공공서비스예약 — [문화행사](https://data.seoul.go.kr/dataList/OA-2269/S/1/datasetView.do) `ListPublicReservationCulture`, [교육강좌](https://data.seoul.go.kr/dataList/OA-2268/S/1/datasetView.do) `ListPublicReservationEducation` (원천: yeyak.seoul.go.kr) | family, exhibition, performance, sports(일부) | `SVCNM`, `MAXCLASSNM`/`MINCLASSNM`, `SVCSTATNM`(접수중/종료), `PAYATNM`(무료/유료), `PLACENM`, `USETGTINFO`, `SVCOPNBGNDT`/`SVCOPNENDDT`(이용기간), `RCPTBGNDT`/`RCPTENDDT`(접수기간), `AREANM`, `IMGURL`, `SVCURL`, `DTLCONT` | **있음** `X`=경도, `Y`=위도 — 샘플 호출로 확인 | 비정기(수시) (확인) | ①과 동일 (1회 최대 1,000건) | 이용허락범위 "제한 없음", 저작권자 서울특별시 (확인) | ①과 같은 열린데이터광장 키 | **사용** (가족·체험 공백 보완) |
 | ⑤ | [한국문화정보원 한눈에보는문화정보](https://www.data.go.kr/data/15138937/openapi.do) `B553457/cultureinfo` — `period2`, `area2`, `realm2`, `detail2` | exhibition, performance, festival, family(교육/체험) | `seq`, `title`, `startDate`, `endDate`, `place`, `realmName`, `area`, `sigungu`, `thumbnail`. 상세: `price`, `imgUrl`, `url`, `placeAddr`, `phone`, `contents1`. 요청: `serviceTp`(A 공연/전시, B 행사/축제, C 교육/체험), `from`/`to`, 좌표 범위(`gpsxfrom`~`gpsyto`) | **있음** `gpsX`=경도, `gpsY`=위도 (swagger 확인) | 실시간 (확인) | 개발계정 **10,000/일**, 운영 자동승인 (확인) | 이용허락범위 "제한 없음" (확인). 원천별 저작권 **미확인** | data.go.kr 활용신청 (확인) | **사용(보조)** — ①③과 중복 예상, M0에서 고유 항목 비율 실측 후 결정 |
 | ⑥ | [서울 실시간 도시데이터](https://data.seoul.go.kr/dataList/OA-21285/S/1/datasetView.do) `citydata` `EVENT_STTS` | — | `EVENT_NM`, `EVENT_PERIOD`, `EVENT_PLACE`, `EVENT_X/Y`, `URL` | 있음 | 문화행사 1일 | 1회 1장소만 | — | ① 키 | **보류** — URL이 서울문화포털이라 ①과 같은 원천으로 보임 (샘플 확인). 신규 정보 없음 |
@@ -85,7 +85,7 @@
 |---|---|---|---|
 | `nature` | 수동 큐레이션 + 기상청·산림청 발표 | 봄(벚꽃)·가을(단풍) 시즌만. **실시간 상태 없음** | 명소 목록 운영자 작성. 비시즌엔 비어 있음 → 노을·야경 명소는 상시 항목 여부 결정 필요 |
 | `festival` | ② TourAPI, ① 서울문화행사 | 대형 축제는 양호 (미확인) | 동네 플리마켓·소규모 행사는 누락 가능 |
-| `performance` | ③ KOPIS, ① | **양호** (KOPIS는 티켓 판매 집계 기반) | 버스킹·무료 거리공연은 KOPIS에 거의 없음 → ① 의존 |
+| `performance` | ① 서울문화행사, ⑤ 문화포털 (③ KOPIS 보류) | 중 — KOPIS 없이 서울문화포털 등록 공연 위주 (2026-11-24 실측 §9) | 대학로 상업 공연 일부 누락 가능. KOPIS는 사업자 등록 후 재검토 |
 | `exhibition` | ①, ⑤ | 공공 미술관은 양호, **상업 갤러리는 미확인** | 갤러리 전시 누락 가능 |
 | `popup` | 없음 | **0** | §3.4 |
 | `food` | ①② GPT 재분류 (야시장·먹거리 장터) | 낮음 | 푸드트럭 제외 |
@@ -233,11 +233,32 @@ flowchart LR
 
 ---
 
+### 9.1 실측 결과 (2026-11-24, 이슈 #42 수집기 첫 실행)
+`go run ./cmd/ingest -out data/snapshot.json -max-gpt 150` 한 번 실행한 결과. 기준 시각 2026-11-24 12:07 KST, 시작이 90일 넘게 남은 항목 제외.
+
+| 소스 | 받은 건수 | 저장 | 제외 (사유) | 중복 병합 | 좌표 결측 → 보강 | 무료 판정 가능 |
+|---|---|---|---|---|---|---|
+| ① 서울 문화행사 `culturalEventInfo` | 19,789 (누적, 20회 호출) | **297** (진행 중 184) | 끝남 19,488 | 4 | 결측 0 (깨진 위도 `37.57~2` 1건은 앞 숫자로 복구) | 100% (`IS_FREE`) — 무료 211·유료 86 |
+| ④ 공공서비스예약 문화행사+교육강좌 | 1,155 (865+290) | **893** (진행 중 733) | 끝남 35, 좌표 없음 33, 서울 밖 10, 볼거리 아님(청년정보·정보통신·교양/어학) 50 | 134 (같은 장소·제목의 회차별 예약) | 결측 33 → 지오코딩 0 (장소명만 있음, 제외) | 100% (`PAYATNM`) — 무료 555·유료 338 |
+| ② TourAPI `searchFestival2` (서울, 시작일 400일 전부터) | 189 | **17** | 끝남 167, 90일 넘는 미래 1 | 4 | 결측 0 | 14/17 (`detailIntro2` 이용요금) |
+| ⑤ 문화포털 `area2` (sido=서울, 오늘~180일) | 485 | **405** | 좌표 없음 37 | 43 | 결측 40 → 장소명 색인 3, 지오코딩 0 | 0% — `detail2`가 10건 후 **HTTP 429**(한도 미확인)로 상세 못 받음 |
+| **합계** | | **1,612** (진행 중 1,114) | | 185 | 지오코딩 26회 호출, 성공 0 | |
+
+- **카테고리(병합 후)**: family 488, performance 428, nature 290, exhibition 270, festival 72, sports 41, pet 19, food 4, popup 0. KOPIS 없이도 performance 428건(문화포털 316 + 서울 문화행사 87 등).
+- **원천 분류 코드값(V11, 진행 중·예정 기준)**: `CODENAME` 전시/미술·교육/체험·클래식·콘서트·기타·연극·국악·뮤지컬/오페라·축제-문화/예술·영화·무용·축제-자연/경관·축제-관광/체육·독주/독창회·축제-기타. 예약 `MAXCLASSNM>MINCLASSNM` 문화체험>(교육체험·산림여가·서울형키즈카페·공원탐방·전시/관람·문화행사·농장체험), 교육강좌>(자연/과학·기타·청년정보·역사·스포츠·공예/취미·도시농업·미술제작·교양/어학·정보통신). 문화포털 `realmName` 교육/체험·국악·기타·무용/발레·뮤지컬/오페라·아동/가족·연극·음악/콘서트·전시·행사/축제. 매핑 표는 `internal/ingest/sources`.
+- **문화포털 고유 비율(V4, 일부)**: 405건 중 43건만 다른 소스와 병합(제목+기간+100m) → 대부분 고유(대학로 상업 공연). **유지**.
+- **지오코딩(V13 일부)**: 네이버 Geocoding은 주소만 찾고 장소명(POI)은 못 찾는다("국립국악원" 0건). 좌표 없는 항목은 대부분 장소명만 있어 실패 → 제외. 장소 검색 API(카카오 키워드 등)는 후속.
+- **호출량(V8 일부)**: 서울 22회, TourAPI 35회(목록 1 + 상세 17×2), 문화포털 목록 1회 + 상세 10회(429), 네이버 26회. 문화포털 `detail2`는 같은 날 앞선 시험 호출(~500회) 뒤 429가 계속됨 → 상세 일일·시간 한도 **미확인**, 수집기는 상한(기본 600)·429 즉시 중단으로 대응.
+- **GPT(OpenAI `gpt-5.4-nano`, reasoning none)**: 150회(10건 배치) → 1,495건 요약, 입력 362,526·출력 70,218 토큰, 추정 약 US$0.16(단가 가정 입력 $0.20/출력 $1.25 per 1M). 이후 실행은 원문 해시(content_hash)가 같으면 재호출하지 않는다.
+- **이미지 보유율**: 4개 소스 모두 100% (TourAPI `cpyrhtDivCd`는 아직 저장 안 함 → V7 후속).
+- **`source_url`**: ①④ 100%, TourAPI 8/17(`homepage`), 문화포털 0%(상세 미수신) → V15 후속.
+
 ## 10. 미확인 항목 모음
 | 항목 | 현재 근거 |
 |---|---|
 | 서울 열린데이터광장 일반 키 **일일** 호출 한도 | 공식 안내에서 "1회 최대 1,000건"만 확인 |
-| KOPIS 호출 제한, 이용약관, 출처 표기 문구, 키 발급 절차 | 2차 자료(GitHub 이슈)만. data.go.kr은 "이용허락 제한 없음", "트래픽 기관 정책에 따라 상이" |
+| KOPIS 호출 제한, 이용약관, 출처 표기 문구 | **보류**(키 발급에 기관 서류 필요, 사업자 등록 후 재검토) |
+| 문화포털 `detail2` 호출 한도 | 2026-11-24 약 500회 뒤 HTTP 429 지속 (일일·시간 한도 미확인) |
 | KOPIS 포스터 http→https 변환 필요 여부 | 2차 자료 |
 | 문화정보(⑤)의 원천별 저작권, 서울 항목 수 | — |
 | 기상청 계절관측·산림청 예측의 API 제공 여부 | API 미발견, 웹·보도자료만 확인 |
@@ -259,6 +280,7 @@ flowchart LR
 | 날짜 | 버전 | 내용 |
 |---|---|---|
 | 2026-11-20 | v0.1 | 초안 작성 |
+| 2026-11-24 | v1.1 | KOPIS 보류(기관 서류 필요, 사업자 등록 후) — 공연은 서울 문화행사·문화포털로. §9.1 수집기 첫 실행 실측 추가 (이슈 #42) |
 
 ## 참고
 - 서울시 문화행사 정보: https://data.seoul.go.kr/dataList/OA-15486/S/1/datasetView.do

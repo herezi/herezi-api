@@ -24,23 +24,24 @@ import (
 // spotRow is the GORM model for the spots table. geog is never read directly:
 // lat/lng/distance_m are computed columns in SELECT (read-only, `->`).
 type spotRow struct {
-	ID        string     `gorm:"column:id;primaryKey"`
-	Source    string     `gorm:"column:source"`
-	SourceID  string     `gorm:"column:source_id"`
-	Title     string     `gorm:"column:title"`
-	Summary   string     `gorm:"column:summary"`
-	Category  string     `gorm:"column:category"`
-	Lat       float64    `gorm:"column:lat;->"`
-	Lng       float64    `gorm:"column:lng;->"`
-	Address   string     `gorm:"column:address"`
-	PlaceName string     `gorm:"column:place_name"`
-	StartsAt  time.Time  `gorm:"column:starts_at"`
-	EndsAt    *time.Time `gorm:"column:ends_at"`
-	IsFree    *bool      `gorm:"column:is_free"`
-	ImageURL  string     `gorm:"column:image_url"`
-	SourceURL string     `gorm:"column:source_url"`
-	FetchedAt time.Time  `gorm:"column:fetched_at"`
-	DistanceM *float64   `gorm:"column:distance_m;->"`
+	ID          string     `gorm:"column:id;primaryKey"`
+	Source      string     `gorm:"column:source"`
+	SourceID    string     `gorm:"column:source_id"`
+	Title       string     `gorm:"column:title"`
+	Summary     string     `gorm:"column:summary"`
+	Category    string     `gorm:"column:category"`
+	Lat         float64    `gorm:"column:lat;->"`
+	Lng         float64    `gorm:"column:lng;->"`
+	Address     string     `gorm:"column:address"`
+	PlaceName   string     `gorm:"column:place_name"`
+	StartsAt    time.Time  `gorm:"column:starts_at"`
+	EndsAt      *time.Time `gorm:"column:ends_at"`
+	IsFree      *bool      `gorm:"column:is_free"`
+	ImageURL    string     `gorm:"column:image_url"`
+	SourceURL   string     `gorm:"column:source_url"`
+	FetchedAt   time.Time  `gorm:"column:fetched_at"`
+	ContentHash string     `gorm:"column:content_hash"`
+	DistanceM   *float64   `gorm:"column:distance_m;->"`
 }
 
 func (spotRow) TableName() string { return "spots" }
@@ -48,7 +49,7 @@ func (spotRow) TableName() string { return "spots" }
 // spotColumns selects every spotRow column; lat/lng come from the geography point.
 const spotColumns = "id, source, source_id, title, summary, category, " +
 	"ST_Y(geog::geometry) AS lat, ST_X(geog::geometry) AS lng, " +
-	"address, place_name, starts_at, ends_at, is_free, image_url, source_url, fetched_at"
+	"address, place_name, starts_at, ends_at, is_free, image_url, source_url, fetched_at, content_hash"
 
 // Store implements store.SpotStore on PostgreSQL + PostGIS.
 type Store struct {
@@ -194,7 +195,7 @@ func (s *Store) SpotByID(ctx context.Context, id string) (domain.Spot, error) {
 // upsertColumns are overwritten when (source, source_id) already exists.
 var upsertColumns = []string{
 	"title", "summary", "category", "geog", "address", "place_name",
-	"starts_at", "ends_at", "is_free", "image_url", "source_url", "fetched_at",
+	"starts_at", "ends_at", "is_free", "image_url", "source_url", "fetched_at", "content_hash",
 }
 
 // UpsertSpot implements store.SpotWriter. A zero FetchedAt becomes now.
@@ -209,6 +210,7 @@ func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
 		"address": sp.Address, "place_name": sp.PlaceName,
 		"starts_at": sp.StartsAt, "ends_at": sp.EndsAt, "is_free": sp.IsFree,
 		"image_url": sp.ImageURL, "source_url": sp.SourceURL, "fetched_at": sp.FetchedAt,
+		"content_hash": sp.ContentHash,
 	}
 	err := s.db.WithContext(ctx).Model(&spotRow{}).
 		Clauses(clause.OnConflict{
@@ -223,12 +225,30 @@ func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
 	return nil
 }
 
+// EnrichedSpots는 GPT 보강 결과가 있는(content_hash와 요약이 채워진) 항목을 모두 돌려준다.
+// 수집 배치가 원문 해시 캐시로 쓴다 — 해시가 같으면 GPT를 다시 부르지 않는다.
+func (s *Store) EnrichedSpots(ctx context.Context) ([]domain.Spot, error) {
+	var rows []spotRow
+	err := s.db.WithContext(ctx).Model(&spotRow{}).
+		Select(spotColumns).
+		Where("content_hash <> '' AND summary <> ''").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("postgres: enriched spots: %w", err)
+	}
+	out := make([]domain.Spot, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toDomain())
+	}
+	return out, nil
+}
+
 func (r spotRow) toDomain() domain.Spot {
 	sp := domain.Spot{
 		ID: r.ID, Source: r.Source, SourceID: r.SourceID, Title: r.Title, Summary: r.Summary,
 		Category: domain.Category(r.Category), Lat: r.Lat, Lng: r.Lng, Address: r.Address,
 		PlaceName: r.PlaceName, StartsAt: r.StartsAt, EndsAt: r.EndsAt, IsFree: r.IsFree,
-		ImageURL: r.ImageURL, SourceURL: r.SourceURL, FetchedAt: r.FetchedAt,
+		ImageURL: r.ImageURL, SourceURL: r.SourceURL, FetchedAt: r.FetchedAt, ContentHash: r.ContentHash,
 	}
 	if r.DistanceM != nil {
 		d := int(math.Round(*r.DistanceM))

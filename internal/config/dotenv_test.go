@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -17,7 +17,7 @@ func TestLoadDotEnv(t *testing.T) {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
 	}
-	n, err := loadDotEnv(p)
+	n, err := LoadDotEnv(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestLoadDotEnv(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got, want)
 		}
 	}
-	if n, err := loadDotEnv(filepath.Join(t.TempDir(), "missing")); n != 0 || err != nil {
+	if n, err := LoadDotEnv(filepath.Join(t.TempDir(), "missing")); n != 0 || err != nil {
 		t.Errorf("missing file: n=%d err=%v", n, err)
 	}
 }

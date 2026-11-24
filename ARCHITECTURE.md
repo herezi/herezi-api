@@ -24,6 +24,10 @@
 | `internal/store/memory`, `internal/store/postgres` | `domain`, `store` | `httpapi`, 서로 |
 | `internal/httpapi` | `domain`, `store`(인터페이스), `geo`(인터페이스·타입) | 구체 저장소, ingest 관련 패키지 |
 | `internal/geo` | `domain`, 표준 라이브러리 | `store`, `httpapi`, ingest 관련 패키지 |
+| `internal/snapshot` | `domain` | 나머지 internal |
+| `internal/config` | 표준 라이브러리만 | 나머지 internal |
+| `internal/ingest` | `domain`, `geo` | `store`·`httpapi`, 하위 `sources`·`openai` |
+| `internal/ingest/sources`, `internal/ingest/openai` | `domain`, `ingest` | `store`·`httpapi`, 서로 |
 | `cmd/*` | 모두 | — (조립만 하고 로직을 두지 않는다) |
 | `internal/store/storetest` | `domain`, `store` | 구현체 (구현체의 테스트가 이 패키지를 부른다) |
 
@@ -56,5 +60,15 @@
 - 스키마의 기준은 goose 마이그레이션이다. `AutoMigrate`는 쓰지 않는다(geography 컬럼·GiST 인덱스를 표현할 수 없음).
 - 공간 조건(`ST_DWithin`, `ST_Distance`, `ST_MakePoint` 등)은 GORM raw 표현식(`Where`, `Select`, `gorm.Expr`)으로 쓴다. 사용자 입력은 항상 `?` 바인딩으로 넘긴다.
 
-## 앞으로 들어올 것
-- `cmd/ingest` 아래 수집 파이프라인(수집기 → 정규화 → 지오코딩 → GPT 보강 → 중복 제거). 수집기와 정규화는 `domain.RawItem`으로만 연결해 서로 의존하지 않게 한다. httpapi는 ingest 쪽을 import하지 않는다.
+## 수집 배치: `cmd/ingest` (이슈 #42)
+```
+sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖·90일 넘는 미래) ─▶ 좌표 보강(장소명 색인 → 네이버 Geocoding)
+   ─▶ Dedup(정규화 제목 + 기간 겹침 + 100m, 이미지·원본 좌표 있는 쪽이 대표) ─▶ GPT 보강(content_hash 캐시, 요청 수 상한, 배치 JSON)
+   ─▶ Sink: DATABASE_URL 있으면 postgres.UpsertSpot, 없으면 snapshot.Write(-out)
+```
+- `internal/ingest`: `Source` 인터페이스, `Record`(정규화 Spot + 원천 분류·설명·요금 텍스트), 정규화 도우미(날짜·HTML·무료 규칙·키워드 분류), `Dedup`, `Pipeline`, `Enricher` 인터페이스.
+- `internal/ingest/sources`: 소스별 수집기(서울 문화행사, 공공서비스예약, TourAPI, 문화포털)와 원천 분류 → 9개 카테고리 매핑 표. 파서는 `testdata/` 실제 응답 픽스처로 테스트.
+- `internal/ingest/openai`: Chat Completions 배치 클라이언트(net/http). GPT는 요약(60자)·애매한 분류·애매한 무료만. 날짜·좌표·가격은 원천 값만 쓴다.
+- GPT 캐시: `domain.Spot.ContentHash`(원문 해시). postgres는 `content_hash` 컬럼(`EnrichedSpots`), 스냅샷은 이전 `-out` 파일을 읽어 해시가 같으면 재호출하지 않는다.
+- `cmd/api`는 `DATABASE_URL`이 없고 `SNAPSHOT_PATH`가 있으면 스냅샷을 메모리 저장소에 올린다. httpapi는 ingest 쪽을 import하지 않는다.
+- 외부 호출 에러에는 URL(키·주소)을 넣지 않는다(`url.Error`를 풀고 HTTP 상태만).
