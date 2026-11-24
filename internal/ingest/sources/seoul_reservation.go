@@ -70,7 +70,7 @@ var reservationCategory = map[string]rsvMap{
 	"문화체험>농장체험":    {domain.CategoryFamily, true},
 	"교육강좌>자연/과학":   {domain.CategoryFamily, false},
 	"교육강좌>역사":      {domain.CategoryFamily, false},
-	"교육강좌>스포츠":     {domain.CategorySports, true},
+	"교육강좌>스포츠":     {domain.CategoryFamily, false}, // 종목 키워드가 있으면 sports(KeywordCategory), 없으면 GPT(심폐소생술교육 → sports 오분류, #44)
 	"교육강좌>공예/취미":   {domain.CategoryFamily, false},
 	"교육강좌>도시농업":    {domain.CategoryFamily, false},
 	"교육강좌>미술제작":    {domain.CategoryFamily, false},

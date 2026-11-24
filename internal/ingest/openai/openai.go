@@ -47,11 +47,12 @@ func New(apiKey string) *Client {
 }
 
 const systemPrompt = `너는 서울의 행사·공연·전시 정보를 정리하는 편집자다. 입력 items 각각에 대해 아래 JSON만 출력한다.
-{"items":[{"id":"입력 id 그대로","summary":"...","category":"...","is_free":true|false|null}]}
+{"items":[{"id":"입력 id 그대로","summary":"...","category":"...","is_free":true|false|null,"is_attraction":true|false|null}]}
 규칙:
-- summary: 한국어 1~2줄, 60자 이내. 무엇을 하는/볼 수 있는 곳인지. 입력에 없는 날짜·가격·숫자·장소를 만들지 않는다. 제목을 그대로 반복하지 않는다. 정보가 거의 없으면 제목과 분류로 짧게.
-- category: need_category가 true일 때만 채운다(아니면 null). 다음 중 하나: nature(자연·공원·숲·계절 명소), festival(축제·행사·마켓), performance(공연·영화 상영), exhibition(전시·관람), food(먹거리·야시장), family(어린이·가족·체험·교육), pet(반려견·반려묘 등 반려동물 동반·교육. 반려식물은 family), sports(운동·마라톤·생활체육).
-- is_free: need_free가 true일 때만 판단한다. 요금 텍스트로 확실히 무료면 true, 유료면 false, 애매하면 null. need_free가 false면 null.`
+- summary: need_summary가 true일 때만 쓴다(아니면 ""). 한국어 1~2줄, 60자 이내. 무엇을 하는/볼 수 있는 곳인지. 입력에 없는 날짜·가격·숫자·장소를 만들지 않는다. 제목을 그대로 반복하지 않는다. 정보가 거의 없으면 제목과 분류로 짧게.
+- category: need_category가 true일 때만 채운다(아니면 null). 다음 중 하나: nature(자연·공원·숲·계절 명소), festival(축제·행사·마켓), performance(공연·영화 상영), exhibition(전시·관람), food(먹거리·야시장), family(어린이·가족·체험·1회성 교육 프로그램), pet(반려견·반려묘 등 반려동물 동반·교육. 반려식물은 family), sports(운동 종목 경기·마라톤·생활체육. 안전·보건 교육은 sports가 아니다).
+- is_free: need_free가 true일 때만 판단한다. 요금 텍스트로 확실히 무료면 true, 유료면 false, 애매하면 null. need_free가 false면 null.
+- is_attraction: need_attraction이 true일 때만 판단한다(아니면 null). 일반 시민이 그 기간에 가서 보거나 한 번 참여할 수 있는 볼거리·체험이면 true(사전 예약이 필요한 1회성 체험·가족 프로그램·공연·전시 포함). 다음이면 false: 참가자·교육생·작가 모집이나 공모 공고, 여러 주·학기 등록이 필요한 정규 강좌, 학급·유아 단체·기관 전용, 직무·자격·안전 교육, 상담·클리닉·공간 대여 같은 행정 서비스. 애매하면 null.`
 
 type promptItem struct {
 	ID             string `json:"id"`
@@ -60,8 +61,10 @@ type promptItem struct {
 	Place          string `json:"place,omitempty"`
 	Description    string `json:"description,omitempty"`
 	Fee            string `json:"fee,omitempty"`
+	NeedSummary    bool   `json:"need_summary"`
 	NeedCategory   bool   `json:"need_category"`
 	NeedFree       bool   `json:"need_free"`
+	NeedAttraction bool   `json:"need_attraction"`
 }
 
 type chatRequest struct {
@@ -89,10 +92,11 @@ type chatResponse struct {
 }
 
 type outItem struct {
-	ID       string  `json:"id"`
-	Summary  string  `json:"summary"`
-	Category *string `json:"category"`
-	IsFree   *bool   `json:"is_free"`
+	ID           string  `json:"id"`
+	Summary      string  `json:"summary"`
+	Category     *string `json:"category"`
+	IsFree       *bool   `json:"is_free"`
+	IsAttraction *bool   `json:"is_attraction"`
 }
 
 // EnrichBatch implements ingest.Enricher: items를 한 요청으로 보내고 JSON 결과를 읽는다.
@@ -102,7 +106,8 @@ func (c *Client) EnrichBatch(ctx context.Context, items []ingest.EnrichItem) ([]
 	for _, it := range items {
 		in = append(in, promptItem{
 			ID: it.ID, Title: it.Title, SourceCategory: it.SourceCategory, Place: it.Place,
-			Description: it.Description, Fee: it.FeeText, NeedCategory: it.NeedCategory, NeedFree: it.NeedFree,
+			Description: it.Description, Fee: it.FeeText, NeedSummary: it.NeedSummary,
+			NeedCategory: it.NeedCategory, NeedFree: it.NeedFree, NeedAttraction: it.NeedAttraction,
 		})
 	}
 	user, err := json.Marshal(map[string]any{"items": in})
@@ -163,7 +168,7 @@ func (c *Client) EnrichBatch(ctx context.Context, items []ingest.EnrichItem) ([]
 	}
 	results := make([]ingest.EnrichResult, 0, len(out.Items))
 	for _, o := range out.Items {
-		r := ingest.EnrichResult{ID: o.ID, Summary: strings.TrimSpace(o.Summary), IsFree: o.IsFree}
+		r := ingest.EnrichResult{ID: o.ID, Summary: strings.TrimSpace(o.Summary), IsFree: o.IsFree, IsAttraction: o.IsAttraction}
 		if o.Category != nil {
 			if cat := domain.Category(strings.TrimSpace(*o.Category)); cat.Valid() {
 				r.Category = cat

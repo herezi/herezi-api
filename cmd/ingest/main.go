@@ -9,11 +9,15 @@
 // 환경 변수(로컬은 .env): SEOUL_OPENAPI_KEY, DATA_GO_KR_SERVICE_KEY, OPENAI_API_KEY,
 // NCP_MAPS_CLIENT_ID/NCP_MAPS_CLIENT_SECRET, DATABASE_URL(선택). 값은 출력하지 않는다.
 //
+// GPT가 볼거리 아님으로 판정한 항목은 스냅샷에 없으므로 -excluded-cache(JSON)에 content_hash를 남겨
+// 다음 실행에 다시 묻지 않는다.
+//
 // 예: go run ./cmd/ingest -out data/snapshot.json -max-gpt 150
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +25,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -55,6 +60,8 @@ func run(log *slog.Logger) error {
 	model := flag.String("model", openai.DefaultModel, "OpenAI 모델")
 	priceIn := flag.Float64("price-in", 0.20, "비용 추정용 입력 토큰 단가(USD/1M)")
 	priceOut := flag.Float64("price-out", 1.25, "비용 추정용 출력 토큰 단가(USD/1M)")
+	exCache := flag.String("excluded-cache", "data/excluded.json", "GPT 볼거리 아님 판정 캐시(빈 값이면 안 씀)")
+	showEx := flag.Int("show-excluded", 0, "제외 사유별로 제목 N개씩 출력(품질 점검용)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -104,9 +111,14 @@ func run(log *slog.Logger) error {
 		}
 	}
 
+	if p.PriorExcluded, err = readExcluded(*exCache); err != nil {
+		log.Warn("excluded cache unreadable, starting without it", "err", err)
+	}
+
 	started := time.Now()
 	res := p.Run(ctx)
 	fmt.Print(res.Report.String())
+	printExcluded(res.Excluded, *showEx)
 	cost := float64(res.Report.PromptTokens)/1e6**priceIn + float64(res.Report.CompletionTokens)/1e6**priceOut
 	fmt.Printf("cache entries=%d  est_gpt_cost=$%.4f (model %s, 단가 가정 in $%.2f/out $%.2f per 1M)  elapsed=%s\n",
 		len(p.Prior), cost, *model, *priceIn, *priceOut, time.Since(started).Round(time.Second))
@@ -127,7 +139,74 @@ func run(log *slog.Logger) error {
 		}
 		fmt.Printf("saved %d spots to %s\n", len(res.Spots), *out)
 	}
+	if !*dryRun && *exCache != "" {
+		n, err := writeExcluded(*exCache, res.Excluded)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("saved %d gpt exclusions to %s\n", n, *exCache)
+	}
 	return nil
+}
+
+type excludedFile struct {
+	Version int               `json:"version"`
+	Items   []ingest.Excluded `json:"items"`
+}
+
+// readExcluded는 GPT 볼거리 아님 판정 캐시를 읽는다(content_hash → 사유). 파일이 없으면 빈 맵.
+func readExcluded(path string) (map[string]string, error) {
+	out := map[string]string{}
+	if path == "" {
+		return out, nil
+	}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return out, nil
+	} else if err != nil {
+		return out, err
+	}
+	var f excludedFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return out, err
+	}
+	for _, it := range f.Items {
+		if it.ContentHash != "" {
+			out[it.ContentHash] = it.Reason
+		}
+	}
+	return out, nil
+}
+
+// writeExcluded는 이번 실행의 GPT 판정 제외 항목만 저장한다(규칙 제외는 매번 다시 계산된다).
+func writeExcluded(path string, items []ingest.Excluded) (int, error) {
+	f := excludedFile{Version: 1, Items: []ingest.Excluded{}}
+	for _, it := range items {
+		if it.Reason == ingest.DropGPTNotAttraction && it.ContentHash != "" {
+			f.Items = append(f.Items, it)
+		}
+	}
+	b, err := json.MarshalIndent(f, "", " ")
+	if err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, err
+	}
+	return len(f.Items), os.WriteFile(path, b, 0o644)
+}
+
+func printExcluded(items []ingest.Excluded, n int) {
+	if n <= 0 {
+		return
+	}
+	shown := map[string]int{}
+	for _, it := range items {
+		if shown[it.Reason] < n {
+			shown[it.Reason]++
+			fmt.Printf("  excluded[%s] %s\n", it.Reason, it.Title)
+		}
+	}
 }
 
 func buildSources(list string) ([]ingest.Source, error) {

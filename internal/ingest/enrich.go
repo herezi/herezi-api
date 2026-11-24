@@ -10,8 +10,12 @@ import (
 	"github.com/herezi/herezi-api/internal/domain"
 )
 
-// PromptVersion이 바뀌면 해시가 바뀌어 캐시가 무효화된다(프롬프트를 고칠 때 올린다).
+// PromptVersion은 요약 지시의 버전이다. 바뀌면 요약 캐시(SummaryKey)가 무효화된다(요약 규칙을 고칠 때 올린다).
 const PromptVersion = "v1"
+
+// RulesVersion은 분류·볼거리 판정 규칙(키워드·매핑·GPT 판정 지시)의 버전이다. 바뀌면 content_hash가
+// 바뀌어 GPT 판정(애매한 분류·볼거리 여부)을 다시 받는다. 요약은 SummaryKey가 같으면 재사용한다(이슈 #44).
+const RulesVersion = "r2"
 
 // SummaryMaxRunes는 요약 최대 길이(이슈 #42: 60자, 1~2줄).
 const SummaryMaxRunes = 60
@@ -24,16 +28,19 @@ type EnrichItem struct {
 	Place          string
 	Description    string
 	FeeText        string
+	NeedSummary    bool // 재사용할 요약이 없을 때만
 	NeedCategory   bool // 규칙 분류가 애매할 때만
 	NeedFree       bool // 규칙 무료 판정이 애매할 때만
+	NeedAttraction bool // 규칙으로 볼거리 여부가 애매할 때만
 }
 
-// EnrichResult는 GPT 한 항목 출력. Category가 ""이거나 enum 밖이면 버린다. IsFree nil = 모름.
+// EnrichResult는 GPT 한 항목 출력. Category가 ""이거나 enum 밖이면 버린다. IsFree·IsAttraction nil = 모름.
 type EnrichResult struct {
-	ID       string
-	Summary  string
-	Category domain.Category
-	IsFree   *bool
+	ID           string
+	Summary      string
+	Category     domain.Category
+	IsFree       *bool
+	IsAttraction *bool
 }
 
 // Usage는 GPT 토큰 사용량(비용 추정용).
@@ -46,8 +53,20 @@ type Enricher interface {
 	EnrichBatch(ctx context.Context, items []EnrichItem) ([]EnrichResult, Usage, error)
 }
 
-// ContentHash는 GPT 입력 원문의 해시. 같으면 이전 결과를 재사용한다.
-func ContentHash(r Record) string {
+// ContentHash는 GPT 보강 캐시 키: "규칙 버전-SummaryKey". 같으면 이전 결과(요약·분류·무료·볼거리 판정)를
+// 그대로 재사용한다. 규칙 버전만 다르면 요약·무료만 재사용하고 분류·볼거리 판정은 다시 받는다.
+func ContentHash(r Record) string { return RulesVersion + "-" + SummaryKey(r) }
+
+// SummaryKeyOf는 content_hash에서 SummaryKey 부분을 꺼낸다. 규칙 버전이 없는 예전 해시(r1 이전)는 그대로.
+func SummaryKeyOf(contentHash string) string {
+	if _, key, ok := strings.Cut(contentHash, "-"); ok {
+		return key
+	}
+	return contentHash
+}
+
+// SummaryKey는 요약 입력 원문의 해시(요약 지시 버전 포함). 예전 content_hash와 같은 값이다.
+func SummaryKey(r Record) string {
 	h := sha256.New()
 	for _, s := range []string{PromptVersion, r.Spot.Title, r.SourceCategory, r.Spot.PlaceName, r.Description, r.FeeText} {
 		h.Write([]byte(s))

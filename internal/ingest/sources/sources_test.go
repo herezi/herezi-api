@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,6 +142,7 @@ func TestReservationCategory(t *testing.T) {
 		{"문화체험", "산림여가", "숲 해설", domain.CategoryNature, true, false},
 		{"문화체험", "서울형키즈카페", "키즈카페", domain.CategoryFamily, true, false},
 		{"교육강좌", "스포츠", "배드민턴 교실", domain.CategorySports, true, false},
+		{"교육강좌", "스포츠", "심폐소생술교육", domain.CategoryFamily, false, false},
 		{"문화체험", "교육체험", "반려견 산책 교실", domain.CategoryPet, true, false},
 		{"교육강좌", "정보통신", "코딩", "", false, true},
 		{"문화체험", "새분류", "모름", domain.CategoryFamily, false, false},
@@ -262,5 +264,37 @@ func TestSeoulCultureCategory(t *testing.T) {
 		if c != tc.want || sure != tc.sure {
 			t.Errorf("%s/%s %q = %s %v, want %s %v", tc.code, tc.theme, tc.title, c, sure, tc.want, tc.sure)
 		}
+	}
+}
+
+// 이슈 #44 픽스처(실제 제목)로 공공서비스예약 분류 규칙을 고정한다.
+func TestReservationCategoryFixture(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "testdata", "quality_titles.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Items []struct {
+			Title          string `json:"title"`
+			SourceCategory string `json:"source_category"`
+			WantCategory   string `json:"want_category"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, it := range f.Items {
+		if it.WantCategory == "" {
+			continue
+		}
+		n++
+		maxC, minC, _ := strings.Cut(it.SourceCategory, ">")
+		if c, _, _ := ReservationCategory(maxC, minC, it.Title); string(c) != it.WantCategory {
+			t.Errorf("%s %q = %s, want %s", it.SourceCategory, it.Title, c, it.WantCategory)
+		}
+	}
+	if n < 5 {
+		t.Fatalf("only %d category cases", n)
 	}
 }

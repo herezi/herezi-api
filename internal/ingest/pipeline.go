@@ -31,12 +31,14 @@ type Pipeline struct {
 	Geocoder geo.Geocoder // nil이면 좌표 없는 항목은 장소명 색인으로만 보강
 	Enricher Enricher     // nil이면 GPT 없이(규칙 결과만)
 	// Prior는 이전 결과(content_hash → Spot). 해시가 같으면 요약·분류·무료를 재사용한다.
-	Prior       map[string]domain.Spot
-	MaxGPTCalls int // 요청 수 상한(배치 하나 = 1회)
-	BatchSize   int // 요청 하나에 넣을 항목 수
-	HorizonDays int // 시작이 이보다 먼 미래면 제외(0 = 제한 없음)
-	Now         func() time.Time
-	Log         *slog.Logger
+	Prior map[string]domain.Spot
+	// PriorExcluded는 이전에 GPT가 볼거리 아님으로 판정한 항목(content_hash → 사유). 다시 묻지 않는다.
+	PriorExcluded map[string]string
+	MaxGPTCalls   int // 요청 수 상한(배치 하나 = 1회)
+	BatchSize     int // 요청 하나에 넣을 항목 수
+	HorizonDays   int // 시작이 이보다 먼 미래면 제외(0 = 제한 없음)
+	Now           func() time.Time
+	Log           *slog.Logger
 }
 
 // SourceReport는 소스별 실행 결과.
@@ -63,12 +65,33 @@ type Report struct {
 	PromptTokens     int
 	CompletionTokens int
 	Total            int
+	Categories       map[domain.Category]int // 저장한 Spot의 카테고리별 수
+}
+
+// DroppedTotals는 소스 전체의 제외 사유별 합계.
+func (r Report) DroppedTotals() map[string]int {
+	out := map[string]int{}
+	for _, s := range r.Sources {
+		for k, n := range s.Dropped {
+			out[k] += n
+		}
+	}
+	return out
+}
+
+// Excluded는 볼거리가 아니라서 뺀 항목(규칙 또는 GPT). GPT 판정분은 다음 실행의 PriorExcluded가 된다.
+type Excluded struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Reason      string `json:"reason"`
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // Result는 저장할 Spot과 리포트.
 type Result struct {
-	Spots  []domain.Spot
-	Report Report
+	Spots    []domain.Spot
+	Excluded []Excluded
+	Report   Report
 }
 
 func (p *Pipeline) log() *slog.Logger {
@@ -84,9 +107,10 @@ func (p *Pipeline) Run(ctx context.Context) Result {
 	if p.Now != nil {
 		now = p.Now()
 	}
-	var rep Report
+	rep := Report{Categories: map[domain.Category]int{}}
 	byName := map[string]*SourceReport{}
 	var recs []Record
+	var excluded []Excluded
 	for _, src := range p.Sources {
 		sr := &SourceReport{Source: src.Name(), Dropped: map[string]int{}}
 		rep.Sources = append(rep.Sources, sr)
@@ -98,7 +122,7 @@ func (p *Pipeline) Run(ctx context.Context) Result {
 			sr.Error = err.Error()
 			p.log().Error("ingest: source failed", "source", sr.Source, "err", err)
 		}
-		recs = append(recs, p.filter(got, now, sr)...)
+		recs = append(recs, p.filter(got, now, sr, &excluded)...)
 	}
 
 	geocoded := p.fillCoords(ctx, recs, now, byName, &rep)
@@ -123,16 +147,19 @@ func (p *Pipeline) Run(ctx context.Context) Result {
 		byName[s].DupesMerged += n
 	}
 
-	spots := p.enrich(ctx, kept, byName, &rep)
+	spots, gptExcluded := p.enrich(ctx, kept, byName, &rep)
+	excluded = append(excluded, gptExcluded...)
 	for _, sp := range spots {
 		byName[sp.Source].Kept++
+		rep.Categories[sp.Category]++
 	}
 	rep.Total = len(spots)
-	return Result{Spots: spots, Report: rep}
+	return Result{Spots: spots, Excluded: excluded, Report: rep}
 }
 
-// filter: 필수 필드·끝남·너무 먼 미래·소스 안 중복 ID를 거른다. 좌표 검사는 지오코딩 뒤에.
-func (p *Pipeline) filter(recs []Record, now time.Time, sr *SourceReport) []Record {
+// filter: 필수 필드·끝남·너무 먼 미래·소스 안 중복 ID·볼거리 아님(제목 규칙)을 거른다.
+// 좌표 검사는 지오코딩 뒤에. 볼거리 여부가 애매한 항목은 AttractionMaybe로 표시한다(→ GPT).
+func (p *Pipeline) filter(recs []Record, now time.Time, sr *SourceReport, excluded *[]Excluded) []Record {
 	seen := map[string]bool{}
 	var out []Record
 	for _, r := range recs {
@@ -155,6 +182,13 @@ func (p *Pipeline) filter(recs []Record, now time.Time, sr *SourceReport) []Reco
 			sr.Dropped[DropTooFar]++
 			continue
 		}
+		reason, maybe := AttractionRule(s.Title)
+		if reason != "" {
+			sr.Dropped[reason]++
+			*excluded = append(*excluded, Excluded{ID: s.ID, Title: s.Title, Reason: reason})
+			continue
+		}
+		r.AttractionMaybe = maybe
 		if s.FetchedAt.IsZero() {
 			s.FetchedAt = now
 		}
@@ -241,8 +275,13 @@ func geocodeQueries(r Record) []string {
 }
 
 // enrich: 해시 캐시를 먼저 보고, 남은 항목만 GPT 배치로 보낸다(요청 수 상한).
-// 진행 중인 항목을 먼저 보강한다(앱에 지금 보이는 것부터).
-func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]*SourceReport, rep *Report) []domain.Spot {
+//   - content_hash가 같으면 이전 결과를 그대로 쓴다(GPT 없음).
+//   - 규칙 버전만 바뀌었으면(SummaryKey 같음) 요약·무료는 재사용하고, 애매한 분류·볼거리 판정이
+//     필요한 항목만 요약 없이 판정만 받는다.
+//
+// 우선순위: 볼거리 판정 → 새 요약(진행 중 먼저) → 분류 재판정. GPT가 볼거리 아님으로 판정한 항목은
+// 빼고 Excluded로 돌려준다. 판정을 못 받은 애매한 항목은 남긴다(다음 실행에서 다시 묻는다).
+func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]*SourceReport, rep *Report) ([]domain.Spot, []Excluded) {
 	now := time.Now()
 	if p.Now != nil {
 		now = p.Now()
@@ -258,25 +297,80 @@ func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]
 		return cmp.Compare(a.Spot.ID, b.Spot.ID)
 	})
 
+	// 요약 캐시: 규칙 버전을 뺀 키 → 이전 Spot.
+	bySummary := map[string]domain.Spot{}
+	for h, sp := range p.Prior {
+		if sp.Summary != "" {
+			bySummary[SummaryKeyOf(h)] = sp
+		}
+	}
+
 	spots := make([]domain.Spot, len(recs))
+	items := make([]EnrichItem, len(recs))
+	drop := make([]string, len(recs))
 	var queue []int
 	for i, r := range recs {
 		sp := r.Spot
-		sp.ContentHash = ContentHash(r)
-		if prev, ok := p.Prior[sp.ContentHash]; ok && prev.Summary != "" {
+		hash := ContentHash(r)
+		sr := byName[sp.Source]
+		it := EnrichItem{
+			ID: sp.ID, Title: sp.Title, SourceCategory: r.SourceCategory, Place: sp.PlaceName,
+			Description: Truncate(r.Description, 500), FeeText: Truncate(r.FeeText, 200),
+			NeedSummary: true, NeedCategory: !r.CategorySure, NeedFree: sp.IsFree == nil && r.FeeText != "",
+			NeedAttraction: r.AttractionMaybe,
+		}
+		if reason, ok := p.PriorExcluded[hash]; ok {
+			drop[i] = reason
+			sr.CacheHits++
+			continue
+		}
+		if prev, ok := p.Prior[hash]; ok && prev.Summary != "" {
+			sp.ContentHash = hash
 			sp.Summary = prev.Summary
-			if !r.CategorySure && prev.Category.Valid() {
+			if !r.CategorySure && AcceptGPTCategory(prev.Category, sp.Title, r.Description) {
 				sp.Category = prev.Category
 			}
 			if sp.IsFree == nil {
 				sp.IsFree = prev.IsFree
 			}
-			byName[sp.Source].CacheHits++
-		} else {
-			queue = append(queue, i)
+			sr.CacheHits++
+			spots[i] = sp
+			continue
 		}
-		spots[i] = sp
+		if prev, ok := bySummary[SummaryKey(r)]; ok {
+			// 규칙만 바뀜: 요약·무료 재사용. 판정을 못 받으면 예전 해시를 남겨 다음 실행에 다시 묻는다.
+			sp.ContentHash = prev.ContentHash
+			sp.Summary = prev.Summary
+			if sp.IsFree == nil {
+				sp.IsFree = prev.IsFree
+			}
+			if it.NeedCategory && AcceptGPTCategory(prev.Category, sp.Title, r.Description) {
+				sp.Category = prev.Category
+			}
+			it.NeedSummary, it.NeedFree = false, false
+			if !it.NeedCategory && !it.NeedAttraction {
+				sp.ContentHash = hash
+				sr.CacheHits++
+				spots[i] = sp
+				continue
+			}
+		}
+		if sp.Summary == "" {
+			sp.ContentHash = hash // 요약이 없으면 캐시되지 않는다(cmd/ingest는 요약 있는 것만 캐시)
+		}
+		spots[i], items[i] = sp, it
+		queue = append(queue, i)
 	}
+	prio := func(it EnrichItem) int {
+		switch {
+		case it.NeedAttraction:
+			return 0
+		case it.NeedSummary:
+			return 1
+		}
+		return 2
+	}
+	slices.SortStableFunc(queue, func(a, b int) int { return cmp.Compare(prio(items[a]), prio(items[b])) })
 
 	batch := p.BatchSize
 	if batch <= 0 {
@@ -287,17 +381,12 @@ func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]
 			break
 		}
 		idx := queue[start:min(start+batch, len(queue))]
-		items := make([]EnrichItem, 0, len(idx))
+		in := make([]EnrichItem, 0, len(idx))
 		for _, i := range idx {
-			r := recs[i]
-			items = append(items, EnrichItem{
-				ID: r.Spot.ID, Title: r.Spot.Title, SourceCategory: r.SourceCategory, Place: r.Spot.PlaceName,
-				Description: Truncate(r.Description, 500), FeeText: Truncate(r.FeeText, 200),
-				NeedCategory: !r.CategorySure, NeedFree: r.Spot.IsFree == nil && r.FeeText != "",
-			})
+			in = append(in, items[i])
 		}
 		rep.GPTCalls++
-		results, usage, err := p.Enricher.EnrichBatch(ctx, items)
+		results, usage, err := p.Enricher.EnrichBatch(ctx, in)
 		rep.PromptTokens += usage.PromptTokens
 		rep.CompletionTokens += usage.CompletionTokens
 		if err != nil {
@@ -309,29 +398,48 @@ func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]
 		for _, res := range results {
 			byID[res.ID] = res
 		}
-		for k, i := range idx {
-			res, ok := byID[items[k].ID]
+		for _, i := range idx {
+			it := items[i]
+			res, ok := byID[it.ID]
 			if !ok {
 				continue
 			}
 			r := recs[i]
-			src := strings.Join([]string{r.Spot.Title, r.SourceCategory, r.Spot.PlaceName, r.Description, r.FeeText}, " ")
 			sp := &spots[i]
-			sp.Summary = ValidSummary(res.Summary, src)
-			if items[k].NeedCategory && res.Category.Valid() && res.Category != domain.CategoryPopup &&
-				(res.Category != domain.CategoryPet || petRe.MatchString(r.Spot.Title+" "+r.Description)) { // pet은 반려동물 언급이 있을 때만(반려식물 오분류 방지)
+			sr := byName[sp.Source]
+			rep.GPTItems++
+			if it.NeedAttraction && res.IsAttraction != nil && !*res.IsAttraction {
+				drop[i] = DropGPTNotAttraction
+				continue
+			}
+			if it.NeedCategory && AcceptGPTCategory(res.Category, r.Spot.Title, r.Description) {
 				sp.Category = res.Category
 			}
-			if items[k].NeedFree && res.IsFree != nil {
+			if it.NeedFree && res.IsFree != nil {
 				sp.IsFree = res.IsFree
 			}
-			if sp.Summary != "" {
-				rep.GPTItems++
-				byName[sp.Source].Enriched++
+			sp.ContentHash = ContentHash(r)
+			if it.NeedSummary {
+				src := strings.Join([]string{r.Spot.Title, r.SourceCategory, r.Spot.PlaceName, r.Description, r.FeeText}, " ")
+				if sp.Summary = ValidSummary(res.Summary, src); sp.Summary != "" {
+					sr.Enriched++
+				}
 			}
 		}
 	}
-	return spots
+
+	out := make([]domain.Spot, 0, len(spots))
+	var excluded []Excluded
+	for i, sp := range spots {
+		if drop[i] != "" {
+			sr := byName[recs[i].Spot.Source]
+			sr.Dropped[drop[i]]++
+			excluded = append(excluded, Excluded{ID: recs[i].Spot.ID, Title: recs[i].Spot.Title, Reason: drop[i], ContentHash: ContentHash(recs[i])})
+			continue
+		}
+		out = append(out, sp)
+	}
+	return out, excluded
 }
 
 // String은 사람이 읽는 실행 리포트(표). 키·좌표는 들어가지 않는다.
@@ -350,6 +458,15 @@ func (r Report) String() string {
 			fmt.Fprintf(&b, "  error: %s\n", s.Error)
 		}
 	}
+	var cats, drops []string
+	for _, c := range slices.Sorted(maps.Keys(r.Categories)) {
+		cats = append(cats, fmt.Sprintf("%s=%d", c, r.Categories[c]))
+	}
+	totals := r.DroppedTotals()
+	for _, k := range slices.Sorted(maps.Keys(totals)) {
+		drops = append(drops, fmt.Sprintf("%s=%d", k, totals[k]))
+	}
+	fmt.Fprintf(&b, "dropped: %s\ncategories: %s\n", strings.Join(drops, " "), strings.Join(cats, " "))
 	fmt.Fprintf(&b, "total kept=%d  geocode_calls=%d  gpt_calls=%d (errors %d) gpt_items=%d  tokens in=%d out=%d\n",
 		r.Total, r.GeocodeCalls, r.GPTCalls, r.GPTErrors, r.GPTItems, r.PromptTokens, r.CompletionTokens)
 	return b.String()

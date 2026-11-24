@@ -190,6 +190,9 @@ flowchart LR
 | Q8 | **출처 표시**: 상세 화면에 출처명 + 원문 링크. 설정 화면(S6)에 소스별 라이선스·출처 문구 전체 목록. 공공누리 1유형은 출처 표시 의무, TourAPI Type3 이미지는 변경 금지 |
 | Q9 | **수집 실패 감시**: 소스별 수집 건수가 전일 대비 크게 줄면 알림 (기준치 TECH-PLAN). 실패 시 직전 데이터 유지하되 갱신 시각은 그대로 둬서 오래됨이 보이게 |
 | Q10 | **GPT 출력 검증**: 카테고리는 enum 밖이면 버림, 요약에 원천에 없는 숫자가 있으면 재생성 또는 요약 없이 노출 |
+| Q11 | **볼거리만 수집** (이슈 #44): 누구나 그 기간에 가서 보거나 한 번 참여할 수 있으면 볼거리. 제목 규칙으로 제외 — `recruit`(참가자·교육생·수강생 모집, 공모, 서포터즈·자원봉사, 패스 신청, 학급·기관·단체 전용), `course`(n주 과정·학기·반 편성 정규 강좌), `service`(심폐소생술 등 안전·직무 교육, 상담·클리닉). 1회성 체험·가족 교육 프로그램은 `family`로 유지(사전 예약이어도). "모집·신청·교실·강좌·교육" 등이 있지만 규칙에 안 걸리면 GPT `is_attraction` 판정(`gpt_not_attraction`). 공모전시·지원사업 선정작 공연/전시·"예약 상담 필수" 같은 표현은 제외하지 않는다. 규칙·기대값은 `internal/ingest/attraction.go`, 회귀 픽스처는 `internal/ingest/testdata/quality_titles.json`(실제 제목 43개) |
+| Q12 | **카테고리 오분류 보정** (이슈 #44): GPT 분류는 pet이면 반려동물 언급이 있고 "반려식물"이 아닐 때만, sports면 운동 종목 언급이 있을 때만, performance면 투어·해설·견학이 아닐 때만 받는다(아니면 규칙 카테고리). 공공서비스예약 `교육강좌>스포츠`는 종목 키워드가 있을 때만 sports. "일요가족"의 "요가"는 종목이 아니다 |
+| Q13 | **규칙 버전 캐시**: `content_hash` = `RulesVersion-SummaryKey`. 규칙(`RulesVersion`)이 바뀌면 요약·무료는 재사용하고 애매한 분류·볼거리 판정만 GPT로 다시 받는다(요약 지시가 바뀌면 `PromptVersion`). GPT가 볼거리 아님으로 판정한 항목은 `-excluded-cache`(기본 `data/excluded.json`)에 남겨 다시 묻지 않는다 |
 
 ---
 
@@ -253,6 +256,21 @@ flowchart LR
 - **이미지 보유율**: 4개 소스 모두 100% (TourAPI `cpyrhtDivCd`는 아직 저장 안 함 → V7 후속).
 - **`source_url`**: ①④ 100%, TourAPI 8/17(`homepage`), 문화포털 0%(상세 미수신) → V15 후속.
 
+### 9.2 수집 품질 보정 (2026-11-24, 이슈 #44)
+같은 날 `go run ./cmd/ingest -out data/snapshot.json -max-gpt 150` 재실행(규칙 버전 r2, 이전 스냅샷을 캐시로 사용).
+
+| | 이전(#42) | 이후(#44) |
+|---|---|---|
+| 저장 | 1,612 | **1,510** (−102) |
+| 볼거리 아님 제외 | 교육강좌 분류 `not_leisure` 50 | `not_leisure` 50 + `recruit` 63 + `service` 38 + `course` 17 + `gpt_not_attraction` 10 (끝난 항목 등 포함 수집 단계 기준) |
+| 카테고리 | family 488 · performance 428 · nature 290 · exhibition 270 · festival 72 · sports 41 · pet 19 · food 4 | family 449 · performance 445 · nature 280 · exhibition 260 · festival 48 · sports 17 · pet 8 · food 3 |
+| GPT | 150회 · 약 US$0.16 | 57회(판정 위주, 요약 재사용) · 약 US$0.07 |
+
+- 이전 스냅샷에서 빠진 102건: recruit 44 · service 31 · course 17 · gpt_not_attraction 10. 원래 카테고리는 family 50 · sports 25 · pet 10 · exhibition 9 · 기타 8.
+- pet 19 → 8: 남은 8건은 모두 "반려견 산책교실". 반려식물 클리닉 9건은 service로 제외, 반려식물교실은 family.
+- sports 41 → 17: 영등포 생활체육 교실(반 편성·수강생 모집)·심폐소생술 교육 제외, 남은 것은 클라이밍·스케이트장·드론 레이스·필라테스 등.
+- 재분류 115건: 대부분 GPT 재판정(애매한 분류). 도보관광·해설 투어를 performance로 고른 판정은 Q12 검사로 규칙 카테고리로 되돌린다. GPT 재판정은 같은 입력에도 흔들릴 수 있어 분류 안정화(투어 → nature/exhibition 규칙 등)는 후속.
+
 ## 10. 미확인 항목 모음
 | 항목 | 현재 근거 |
 |---|---|
@@ -281,6 +299,7 @@ flowchart LR
 |---|---|---|
 | 2026-11-20 | v0.1 | 초안 작성 |
 | 2026-11-24 | v1.1 | KOPIS 보류(기관 서류 필요, 사업자 등록 후) — 공연은 서울 문화행사·문화포털로. §9.1 수집기 첫 실행 실측 추가 (이슈 #42) |
+| 2026-11-24 | v1.2 | §7 Q11~Q13(볼거리 판정·오분류 보정·규칙 버전 캐시), §9.2 품질 보정 전후 수치 (이슈 #44) |
 
 ## 참고
 - 서울시 문화행사 정보: https://data.seoul.go.kr/dataList/OA-15486/S/1/datasetView.do
