@@ -3,6 +3,7 @@
 // 환경 변수:
 //   - PORT: 기본 8080
 //   - DATABASE_URL: PostgreSQL(PostGIS) 접속 문자열. 없으면 메모리 저장소로 뜬다.
+//   - MIGRATE_ON_START: "1"이면 시작할 때 goose 마이그레이션(migrations/)을 최신까지 적용한다(DATABASE_URL 필요).
 //   - SNAPSHOT_PATH: DATABASE_URL이 없을 때 메모리 저장소에 올릴 수집 스냅샷(cmd/ingest -out).
 //     없으면 예시 데이터(seed).
 //   - NCP_MAPS_CLIENT_ID / NCP_MAPS_CLIENT_SECRET: 네이버 클라우드 Maps 키(역지오코딩).
@@ -50,6 +51,13 @@ func run(log *slog.Logger) error {
 
 	var spots store.SpotReader
 	if url := os.Getenv("DATABASE_URL"); url != "" {
+		if os.Getenv("MIGRATE_ON_START") == "1" {
+			n, err := postgres.Migrate(ctx, url)
+			if err != nil {
+				return err
+			}
+			log.Info("migrations applied", "count", n)
+		}
 		pg, err := postgres.Open(ctx, url)
 		if err != nil {
 			return err
