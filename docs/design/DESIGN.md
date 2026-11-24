@@ -5,8 +5,8 @@
 | 상태 | 초안 (M1 기준) |
 | 적용 | `herezi-ios`(SwiftUI) · `herezi-android`(Jetpack Compose) 공통 |
 | 근거 | [SERVICE-PLAN §7·§8·§9](../product/SERVICE-PLAN.md), [PRODUCT.md](../product/PRODUCT.md), [api/openapi.yaml](../../api/openapi.yaml) |
-| 화면 스펙 | [screens/](screens/) — 홈 [S1-home](screens/S1-home.md)(사진 카드 피드) · 전체 목록 [S1b-list](screens/S1b-list.md) · 목업 [mockups/](mockups/) |
-| 변경 | #29 홈을 B안 사진 카드 피드 + A안 전체 목록으로, 탭 바 주변·지도·저장 · #33 대체 이미지를 타이포 포스터로, 홈 카테고리 줄을 글자 칩으로(일러스트·색 아이콘 타일 폐기) |
+| 화면 스펙 | [screens/](screens/) — 홈 [S1-home](screens/S1-home.md)(사진 카드 피드) · 전체 목록 [S1b-list](screens/S1b-list.md) · 로그인 시트 [S7-login](screens/S7-login.md) · 목업 [mockups/](mockups/) |
+| 변경 | #29 홈을 B안 사진 카드 피드 + A안 전체 목록으로, 탭 바 주변·지도·저장 · #33 대체 이미지를 타이포 포스터로, 홈 카테고리 줄을 글자 칩으로(일러스트·색 아이콘 타일 폐기) · #67 로그인 시트(S7)·소셜 로그인 버튼·계정 행·탈퇴 확인, 상세 신고 행(기획 v1.3) |
 
 > 디자인 문서는 두 앱이 함께 쓰므로 **이 레포(`herezi-api/docs/design/`) 한 곳에만** 둔다. 앱 레포는 복사하지 말고 링크한다.
 > 토큰 값을 바꾸면 이 문서를 먼저 고치고, 두 앱의 테마 파일을 같은 PR 묶음에서 맞춘다.
@@ -17,6 +17,7 @@
 1. **평평하고 넓게.** 그림자·그라데이션·테두리 대신 여백과 글자 크기 차이로 위계를 만든다. 예외는 하나: 사진 위 글자를 읽게 하는 히어로 카드의 어두운 그라데이션(§6.13).
 2. **잉크 한 가지 색이 주인공.** 주요 버튼·선택 상태·클러스터는 잉크 `#191F28`. 색은 카테고리 구분에만 쓴다.
 3. **쓰지 않는 것:** 토스 블루 계열 주색, 노란색, 지도 핀 모양 로고, 손글씨.
+   - **유일한 예외 — 카카오 노랑 `#FEE500`.** 카카오 로그인 디자인 가이드가 버튼 바탕색을 강제하므로 카카오 로그인 버튼(§6.18)과 설정 계정 행의 카카오 표시(§6.19)에만 쓴다. 그 밖의 곳(강조·배지·일러스트 등)에 노란색을 쓰지 않는다. §2.5 참고.
 4. **"지금"이 먼저 보이게.** 카드에서 가장 먼저 읽히는 순서는 제목 → 거리 → 기간.
 5. **플랫폼 관례 유지.** iOS는 HIG(내비게이션 바·스와이프 뒤로가기·시트), Android는 Material 3(Top app bar·Navigation bar·ModalBottomSheet)를 따르고, 색·글자·모서리만 같게 맞춘다.
 
@@ -117,6 +118,21 @@
 | 탭: 주변 / 지도 / 저장 | `location.circle` / `map` / `bookmark` | `explore` / `map` / `bookmark` |
 | 설정 (저장 탭 상단 바) | `gearshape` | `settings` |
 | 전체 보기 | `chevron.right` | `chevron_right` |
+| 닫기 (시트) | `xmark` | `close` |
+| 오류 제보 (S3 신고 행) | `exclamationmark.bubble` | `feedback` |
+| 로그인 오류 | `exclamationmark.circle` | `error` |
+| 완료 (탈퇴 완료) | `checkmark.circle` | `check_circle` |
+| 계정 연결 끊김 (탈퇴 확인) | `person.crop.circle.badge.xmark` | `link_off` |
+
+### 2.5 외부 브랜드 색 (예외, 토큰 아님)
+브랜드 가이드가 정한 값이라 **우리 토큰 체계에 넣지 않고** 버튼 컴포넌트 안에 상수로 둔다. 값을 바꾸거나 다른 곳에 재사용하지 않는다.
+
+| 이름 | 값 | 쓰는 곳 | 근거 |
+|---|---|---|---|
+| 카카오 버튼 바탕 | `#FEE500` | 카카오 로그인 버튼, 설정 계정 행 카카오 원 | 카카오 로그인 디자인 가이드 (Container) |
+| 카카오 심볼·글자 | `#000000` (글자 85%) | 카카오 로그인 버튼 | 같은 가이드 (Symbol / Label) |
+| Apple 버튼 바탕 | `#000000` | Apple 로그인 버튼(black 스타일), 설정 계정 행 Apple 원 | Apple HIG Sign in with Apple — 잉크 `#191F28`로 바꾸지 않는다 |
+| Apple 로고·글자 | `#FFFFFF` | Apple 로그인 버튼 | 같은 가이드 |
 
 ---
 
@@ -293,9 +309,11 @@
 | 아이콘 버튼 | 터치 44/48, 아이콘 24 | 툴바 |
 
 - 눌림: 불투명도 85% + 0.98 축소(`motion.fast`). 비활성: 배경 `gray200`, 글자 `gray500`.
+- **진행 중**(로그인·탈퇴처럼 몇 초 걸리는 동작): 버튼 글자 자리에 작은 진행 표시 20(버튼 글자색), 버튼 크기·색 유지. §6.7 "스피너 금지"의 유일한 예외 — 화면 가운데 스피너는 여전히 쓰지 않는다.
 
 ### 6.11 토스트 `Toast`
-- 하단 탭바 위 16, 잉크 배경 `radius.sm`, 흰 `type.caption`, 2.5초. 예: "저장했어요", "저장을 취소했어요", "링크를 복사했어요".
+- 하단 탭바 위 16, 잉크 배경 `radius.sm`, 흰 `type.caption`, 2.5초. 예: "저장했어요", "저장을 취소했어요", "링크를 복사했어요", "로그인했어요", "로그아웃했어요", "기기에 저장했던 N개를 계정으로 옮겼어요".
+- 여러 개가 이어지면 겹치지 않고 차례로(큐). 스크린리더로 읽어준다(iOS 알림 announcement / Android `liveRegion`).
 
 ### 6.12 탭 바
 - 3개: **주변**(S1 홈 → S1b 전체 목록) · **지도**(S2) · **저장**(S4). 비교안 B와 같은 구성.
@@ -378,6 +396,48 @@
 - **구현:** 이미지 파일이 아니라 뷰로 그린다(iOS `ZStack` + `Text`, Android `Box` + `Text`). 에셋 없음.
 - **접근성:** 장식 — 스크린리더에서 숨김(`accessibilityHidden(true)` / `clearAndSetSemantics {}`). 제목은 이미 카드·상세의 진짜 글자로 읽힌다. 사진일 때만 "{title} 사진".
 
+### 6.17 로그인 시트 `LoginSheet`
+화면 스펙: [S7-login.md](screens/S7-login.md) · 목업: [mockups/login-sheet.png](mockups/login-sheet.png)
+- 모달 바텀시트, 스크림 `color.scrim`, 위 모서리 `radius.xl`, `elevation.2`, 손잡이 36×4 `gray200`. 높이는 내용에 맞춤.
+- 구성(위→아래): 닫기(오른쪽 위 `xmark`/`close`) → 제목 `type.title2` → 이유 한 줄 `type.body` `text.secondary` → (오류 줄) → `SocialLoginButton` 카카오 → Apple(사이 12) → 약관 안내 `type.caption` 가운데(링크 2개 밑줄).
+- 입력: `title`, `pendingAction`(저장할 spot id 또는 없음). 성공하면 시트를 닫고 `pendingAction`을 실행한다.
+- 상태: 기본 / 진행 중(누른 버튼에 진행 표시, 나머지·닫기 비활성, 끌어서 닫기 막음) / 취소됨(조용히 기본으로) / 오류(오류 줄 + 같은 버튼으로 재시도).
+- **로그인 UI는 이 시트 한 곳에만 둔다.** S4·S6의 "로그인"은 이 시트를 여는 버튼일 뿐 소셜 버튼을 따로 그리지 않는다.
+
+### 6.18 소셜 로그인 버튼 `SocialLoginButton`
+두 버튼은 **같은 크기**: 높이 56(다이나믹 타입에 따라 늘어남, 최소 56), 폭 꽉 채움, 모서리 12, 심볼 24는 왼쪽 20, 글자는 버튼 가운데 `type.title3`(17 SemiBold). 그림자·테두리 없음. 순서는 **카카오 → Apple**(두 플랫폼 같음).
+
+| | 카카오 `KakaoLoginButton` | Apple `AppleLoginButton` |
+|---|---|---|
+| 근거 | 카카오 로그인 디자인 가이드 | Apple HIG "Sign in with Apple", App Store 심사 지침 4.8 |
+| 바탕 | `#FEE500` (가이드 필수, §2.5) | 검정 `#000000` (black 스타일) |
+| 심볼 | 카카오 말풍선 심볼 `#000000`, **카카오 배포 리소스 그대로** | Apple 로고 흰색, **Apple 배포 에셋 그대로** |
+| 글자 | **카카오로 계속하기**, `#000000` 85% | **Apple로 계속하기**, 흰색 |
+| iOS | 직접 그림 | **시스템 버튼** `SignInWithAppleButton(.continue)` + `.signInWithAppleButtonStyle(.black)`, 높이 56, `cornerRadius` 12 — 글자·로고는 시스템이 넣는다 |
+| Android | 직접 그림 | 직접 그림(가이드 비율 유지), 누르면 Custom Tabs 웹 흐름 |
+| 하지 말 것 | 심볼 색·모양 바꾸기, 바탕을 다른 노랑/잉크로 바꾸기, 심볼 없이 글자만 | 바탕을 잉크로 바꾸기, 로고 다시 그리기, 카카오보다 작게·흐리게 두기 |
+
+- 눌림: 불투명도 85%(축소 없음 — 브랜드 버튼은 모양을 바꾸지 않는다). 진행 중·비활성 규칙은 §6.10.
+- 접근성: 라벨 = 버튼 글자. 대비 카카오 ≈ 13:1, Apple 21:1.
+
+### 6.19 계정 행 `AccountRow`
+설정(S6) 계정 그룹 맨 위. 화면 스펙: [S6-settings.md](screens/S6-settings.md) · 목업: [mockups/settings-account.png](mockups/settings-account.png)
+- 행 높이 56, 좌우 20. 왼쪽 제공자 표시 28 원(카카오: `#FEE500` + 검정 심볼 18 / Apple: 검정 + 흰 로고 16), 원–글자 12, 글자 `type.body` **카카오로 로그인됨** / **Apple로 로그인됨**.
+- 탭 동작·화살표 없음. 제공자 표시는 장식(스크린리더 숨김).
+- 로그아웃 상태에서는 이 행 대신 일반 설정 행 **로그인** + 화살표(→ §6.17).
+
+### 6.20 파괴 동작 확인 `DestructiveConfirm`
+되돌릴 수 없는 동작(M1은 **회원 탈퇴**만) 앞에 두는 확인 화면. 빨간 화면을 만들지 않고 **무엇이 사라지는지 글로** 보여준다.
+- push 화면, 상단 바는 뒤로만. 제목 `type.title1` 2줄 → "지워지는 것" 박스(`bg.secondary`, `radius.md`, 행 48: 아이콘 22 `text.secondary` + `type.bodyStrong`) → 안내 `type.caption` → 확인 체크박스(24, `radius.xs`) → 하단 고정 주 버튼(체크 전 비활성).
+- 주 버튼은 **잉크**. 빨강(`color.status.error`)은 그다음 뜨는 **시스템 확인 대화상자의 파괴 버튼**에만(iOS `role: .destructive`, Android `TextButton` 글자색) — 두 번 확인.
+- 진행 중: 주 버튼 진행 표시(§6.10), 뒤로 막음. 완료: 확인 화면을 완료 화면(§6.7 상태 화면 모양 + 하단 주 버튼 **확인**)으로 **교체**해 뒤로 돌아갈 수 없게.
+- 실패: 화면 유지 + 토스트.
+
+### 6.21 신고 행 `ReportRow`
+상세(S3) 출처 카드 아래. 스펙: [S3-detail.md](screens/S3-detail.md) 8번 (herezi-ios#28, herezi-android#25에서 구현됨).
+- 테두리 1px `color.border` + `radius.md`, 안쪽 16, 배경 흰색. 아이콘 20 `text.secondary`(`exclamationmark.bubble` / `feedback`) · 제목 `type.bodyStrong` **정보가 달라요** · 설명 `type.caption` `text.secondary` **기간·장소·요금이 틀렸다면 알려 주세요** · 오른쪽 `chevron.right`.
+- §0 원칙 1(테두리 대신 여백)의 예외: 글자 버튼만으로는 "신고"로 읽히지 않아서 행 하나만 테두리로 구분한다. 다른 목록 행에 퍼뜨리지 않는다.
+
 ---
 
 ## 7. 접근성 기준 (모든 화면 공통)
@@ -395,6 +455,8 @@
 - **검색(S5)**은 `GET /v1/spots`의 `q` 파라미터를 쓴다(#28에서 추가됨).
 - **홈(S1)은 `/v1/spots` 한 번**(`when=week&limit=100`)으로 받아 앱에서 섹션을 나눈다. 섹션 규칙은 [S1-home.md](screens/S1-home.md). 서버 변경 없음.
 - **대체 이미지**(`SpotImagePlaceholder`)는 에셋 없이 뷰로 그린다(§6.16). 제목 줄바꿈·말줄임은 플랫폼 텍스트 레이아웃에 맡기고 `lineLimit(3)` / `maxLines = 3`.
+- **로그인·저장(v1.3)**: 둘러보기(S1·S1b·S2·S3·S5)는 로그인 없이. 저장 버튼만 로그인 상태를 본다 — 로그아웃이면 저장 대신 S7 시트. 인증·엔드포인트는 [TECH-PLAN §4.1](../product/TECH-PLAN.md). 첫 로그인 때 기기 로컬 저장을 계정으로 옮긴다([S4](screens/S4-saved.md) "기기 저장 옮기기").
+- **로그인 버튼 에셋**: 카카오 심볼은 Kakao Developers 리소스, Apple 로고는 iOS 시스템 버튼 / Android는 Apple 배포 에셋. 목업 속 심볼은 자리 표시다.
 
 ## 9. 미결 항목
 | 항목 | 지금 문서에 쓴 값 | 상태 |
@@ -403,3 +465,8 @@
 | 지원·오류 제보 메일 | `help@herezi.com` (S3 정보가 달라요, S6) | **도메인 구매 후 확정** |
 | Pretendard 번들 | 시스템 글꼴로 대체 중 | 라이선스·용량 확인 후 결정. 포스터 ExtraBold(800)가 필요해 번들 쪽이 유리 |
 | 홈 카테고리 줄 모양 | 글자 칩 + 색 점(§6.2 홈 모드, #33 잠정 A안) | 사용자 최종 선택 대기(B 큰 글자 탭 / C 회색 타일 + 선 아이콘) |
+| 로그인 버튼 순서 | 카카오 → Apple (§6.18) | 국내 사용자 기준 결정. 심사에서 문제 되면 Apple을 위로 |
+| 약관·개인정보 처리방침 갱신 | S7 약관 안내가 기존 링크를 씀 | **로그인 출시 전 필수** — 카카오/Apple 계정 식별자 수집 항목 추가(TECH-PLAN §4.1) |
+| Apple 탈퇴 토큰 철회 | 서버 revoke 전제(S6 개발자 주의) | 서버가 refresh token을 보관할지, 탈퇴 직전 재인증할지 서버 이슈에서 결정 |
+| Android Apple 로그인 복귀 | Custom Tabs + 앱 딥링크(S7) | Supabase 리다이렉트 URL·Apple Services ID 설정 필요 |
+| 카카오 로그인 버튼 글자 | "카카오로 계속하기" | 가이드가 허용하는 문구 범위 안 — 카카오 앱 검수 때 확인 |

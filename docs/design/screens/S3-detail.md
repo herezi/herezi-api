@@ -28,7 +28,21 @@
    - 1줄 `type.caption` `text.secondary`: **출처 · 서울 열린데이터광장**
    - 2줄 `type.caption` `text.secondary`: **2시간 전 갱신**
    - 오른쪽 글자 버튼 **원문 보기** + `arrow.up.right` (`source_url` 없으면 숨김) → 인앱 브라우저(SFSafariViewController / Custom Tabs)
-8. **오류 제보** 글자 버튼 가운데 `type.caption` `text.secondary`: **정보가 달라요** → `help@herezi.com`(도메인 구매 후 확정) 메일 작성(제목 `[정보 오류] {id} {title}`) — 위 `space.4`, 아래 하단 바 높이 + `space.6`
+8. **오류 제보 행** `ReportRow` (좌우 20, 위 `space.3`, 아래 하단 바 높이 + `space.6`) — 글자 버튼만으로는 신고 기능으로 보이지 않아 테두리 행으로 바꿨다(herezi-ios#28, herezi-android#25).
+   ```
+   ┌──────────────────────────────────────────────┐
+   │ (!)  정보가 달라요                          › │  bodyStrong, text.primary
+   │      기간·장소·요금이 틀렸다면 알려 주세요      │  caption, text.secondary
+   └──────────────────────────────────────────────┘
+   ```
+   - 모양: 폭 꽉 채움, 안쪽 16(`space.4`), 배경 없음(흰색), 테두리 1px `color.border`, `radius.md`. 그림자 없음.
+   - 왼쪽 아이콘 `exclamationmark.bubble` / `feedback`(Rounded) 20, `text.secondary`, 24 폭 칸 가운데. 아이콘–글자 `space.3`.
+   - 제목 **정보가 달라요** `type.bodyStrong` `text.primary`, 아래 2 간격 설명 **기간·장소·요금이 틀렸다면 알려 주세요** `type.caption` `text.secondary`.
+   - 오른쪽 `chevron.right` / `chevron_right` 13(SemiBold) `icon.secondary`, 글자와 최소 `space.2`.
+   - 누르면 `help@herezi.com`(도메인 구매 후 확정) 메일 작성(제목 `[정보 오류] {id} {title}`). 메일 앱이 없으면 토스트 **메일 앱이 없어요. help@herezi.com 으로 보내 주세요**.
+   - 누름 상태: 행 배경 `bg.secondary`(iOS 하이라이트 / Android ripple ink 8%). 행 전체가 터치 영역.
+   - 접근성: 한 요소로 묶고 라벨 "정보가 달라요. 잘못된 정보 신고", 힌트 "메일 앱이 열려요".
+   - 구현 차이(허용): Android는 `Icons.Rounded.Feedback` 22·`KeyboardArrowRight` 20(`textSecondary`)로 그린다. 플랫폼 아이콘 광학 크기 차이라 그대로 둔다.
 9. **하단 고정 바** (흰 배경, 위 1px `border`, 안쪽 좌우 20 위 12 아래 안전 영역+12)
    - 주 버튼 **네이버지도로 길찾기** (전체 폭)
 
@@ -43,7 +57,7 @@
 
 ## 인터랙션
 - **네이버지도로 길찾기** → 네이버지도 앱 `nmap://route/walk?dlat&dlng&dname={place_name}&appname=com.herezi.app`; 앱이 없으면 앱스토어/플레이스토어 대신 웹 `https://map.naver.com/p/directions/-/{lng},{lat},{place_name}/-/walk`. 거리 2km 이상이면 `route/public`.
-- **저장** 아이콘 → 즉시 토글(`motion.fast` 채움 + 햅틱), 토스트 **저장했어요** / **저장을 취소했어요**. 기기 로컬 저장, 가입 없음.
+- **저장** 아이콘 → **로그인 상태면** 즉시 토글(`motion.fast` 채움 + 햅틱, 낙관적 갱신 후 `PUT`/`DELETE /v1/me/saved/{id}`), 토스트 **저장했어요** / **저장을 취소했어요**. 실패하면 되돌리고 **저장하지 못했어요. 다시 눌러 주세요.** **로그아웃 상태면** 아이콘을 채우지 않고 S7 로그인 시트를 띄운다 → 로그인 성공 시 저장까지 마치고 **저장했어요**([S7-login.md](S7-login.md)). 둘러보기·상세·공유·길찾기는 로그인 없이.
 - **공유** → 시스템 공유 시트. 내용: `{title}\n{기간} · {place_name}\nhttps://herezi.com/s/{id}` (도메인 구매 후 확정 — DESIGN §9. 구매 전 빌드는 `source_url`). 카카오톡은 공유 시트 안에서 선택(M1은 카카오 SDK 미사용).
 - **iOS 스와이프 뒤로 / Android 뒤로** → 이전 화면, 스크롤 위치 유지.
 
