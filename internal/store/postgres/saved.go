@@ -25,9 +25,10 @@ type savedRow struct {
 
 func (savedRow) TableName() string { return "saved_spots" }
 
-// savedSpotRow is a spots row joined with saved_at.
+// savedSpotRow is a spots row joined with saved_at. Spot은 이름 있는 필드여야 한다
+// (GORM은 export되지 않은 익명 임베드 타입의 필드를 채우지 않는다).
 type savedSpotRow struct {
-	spotRow `gorm:"embedded"`
+	Spot    spotRow   `gorm:"embedded"`
 	SavedAt time.Time `gorm:"column:saved_at;->"`
 }
 
@@ -107,7 +108,7 @@ func (s *Store) SavedSpots(ctx context.Context, q store.SavedQuery) ([]store.Sav
 	}
 	out := make([]store.SavedSpot, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, store.SavedSpot{Spot: r.toDomain(), SavedAt: r.SavedAt})
+		out = append(out, store.SavedSpot{Spot: r.Spot.toDomain(), SavedAt: r.SavedAt})
 	}
 	return out, nil
 }
