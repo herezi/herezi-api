@@ -3,6 +3,10 @@
 //	수집(소스별) → 정규화 → 필터(끝남·서울 밖) → 좌표 보강(장소명 색인·네이버 Geocoding·카카오 키워드)
 //	→ 중복 제거 → GPT 보강(요약·애매한 분류·애매한 무료, 해시 캐시·호출 상한) → 저장
 //
+// 끝난 항목은 종료 후 -retain-ended-days(기본 90일) 동안 보존한다(상세·저장 목록용, 이슈 #51).
+// 원천 목록에서 빠져도 지우지 않고(DB: last_seen_at만 갱신 중단, 스냅샷: 이전 스냅샷에서 유지),
+// 보존 기간이 지난 항목과 볼거리 아님 판정 항목만 정리한다.
+//
 // 저장: DATABASE_URL이 있으면 PostGIS에 upsert(GORM), 없으면 -out JSON 스냅샷.
 // cmd/api는 DATABASE_URL 없이 SNAPSHOT_PATH로 스냅샷을 메모리 저장소에 올린다.
 //
@@ -57,6 +61,7 @@ func run(log *slog.Logger) error {
 	out := flag.String("out", "data/snapshot.json", "DATABASE_URL이 없을 때 쓸 스냅샷 경로(이전 스냅샷은 해시 캐시로 읽는다)")
 	dryRun := flag.Bool("dry-run", false, "저장하지 않고 리포트만 출력")
 	horizon := flag.Int("horizon-days", 90, "시작이 이보다 먼 미래인 항목 제외(0 = 제한 없음)")
+	retain := flag.Int("retain-ended-days", ingest.DefaultRetainEndedDays, "끝난 항목 보존 기간(일). 지나면 제외·정리(0 = 끝나면 제외)")
 	model := flag.String("model", openai.DefaultModel, "OpenAI 모델")
 	priceIn := flag.Float64("price-in", 0.20, "비용 추정용 입력 토큰 단가(USD/1M)")
 	priceOut := flag.Float64("price-out", 1.25, "비용 추정용 출력 토큰 단가(USD/1M)")
@@ -70,12 +75,12 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
-	srcs, err := buildSources(*srcFlag)
+	srcs, err := buildSources(*srcFlag, *retain)
 	if err != nil {
 		return err
 	}
 	p := &ingest.Pipeline{
-		Sources: srcs, MaxGPTCalls: *maxGPT, BatchSize: *batch, HorizonDays: *horizon, Log: log,
+		Sources: srcs, MaxGPTCalls: *maxGPT, BatchSize: *batch, HorizonDays: *horizon, RetainEndedDays: *retain, Log: log,
 	}
 	if id, secret := os.Getenv("NCP_MAPS_CLIENT_ID"), os.Getenv("NCP_MAPS_CLIENT_SECRET"); id != "" && secret != "" {
 		p.Geocoder = geo.NewNaverGeocoder(id, secret)
@@ -97,7 +102,7 @@ func run(log *slog.Logger) error {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	var pg *postgres.Store
-	var prior []domain.Spot
+	var prior, previous []domain.Spot // previous: 이전 스냅샷 전체(스냅샷 모드에서 안 보인 항목 유지용)
 	if dbURL != "" {
 		if pg, err = postgres.Open(ctx, dbURL); err != nil {
 			return err
@@ -106,8 +111,11 @@ func run(log *slog.Logger) error {
 		if prior, err = pg.EnrichedSpots(ctx); err != nil {
 			return err
 		}
-	} else if prior, _, err = snapshot.Read(*out); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	} else if previous, _, err = snapshot.Read(*out); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		log.Warn("previous snapshot unreadable, starting without cache", "err", err)
+	}
+	if pg == nil {
+		prior = previous
 	}
 	p.Prior = map[string]domain.Spot{}
 	for _, sp := range prior {
@@ -132,17 +140,31 @@ func run(log *slog.Logger) error {
 	case *dryRun:
 		fmt.Println("dry-run: 저장하지 않음")
 	case pg != nil:
+		// 원천에서 빠진 행은 지우지 않는다(upsert만). 볼거리 아님 판정 행과 보존 기간 지난 행만 정리한다.
 		for _, sp := range res.Spots {
 			if err := pg.UpsertSpot(ctx, sp); err != nil {
 				return err
 			}
 		}
-		fmt.Printf("saved %d spots to postgres\n", len(res.Spots))
-	default:
-		if err := snapshot.Write(*out, time.Now().UTC(), res.Spots); err != nil {
+		removed, err := pg.DeleteSpots(ctx, excludedIDs(res.Excluded))
+		if err != nil {
 			return err
 		}
-		fmt.Printf("saved %d spots to %s\n", len(res.Spots), *out)
+		pruned, err := pg.PruneEnded(ctx, ingest.RetainCutoff(time.Now(), *retain))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("saved %d spots to postgres (excluded removed %d, pruned ended>%dd %d)\n", len(res.Spots), removed, *retain, pruned)
+	default:
+		ex := map[string]bool{}
+		for _, id := range excludedIDs(res.Excluded) {
+			ex[id] = true
+		}
+		spots, retained := ingest.MergeRetained(res.Spots, previous, ex, time.Now(), *retain)
+		if err := snapshot.Write(*out, time.Now().UTC(), spots); err != nil {
+			return err
+		}
+		fmt.Printf("saved %d spots to %s (이번 수집 %d + 이전 스냅샷에서 유지 %d)\n", len(spots), *out, len(res.Spots), retained)
 	}
 	if !*dryRun && *exCache != "" {
 		n, err := writeExcluded(*exCache, res.Excluded)
@@ -152,6 +174,14 @@ func run(log *slog.Logger) error {
 		fmt.Printf("saved %d gpt exclusions to %s\n", n, *exCache)
 	}
 	return nil
+}
+
+func excludedIDs(items []ingest.Excluded) []string {
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	return ids
 }
 
 type excludedFile struct {
@@ -214,7 +244,7 @@ func printExcluded(items []ingest.Excluded, n int) {
 	}
 }
 
-func buildSources(list string) ([]ingest.Source, error) {
+func buildSources(list string, retainDays int) ([]ingest.Source, error) {
 	seoulKey, dataKey := os.Getenv("SEOUL_OPENAPI_KEY"), os.Getenv("DATA_GO_KR_SERVICE_KEY")
 	var out []ingest.Source
 	for _, name := range strings.Split(list, ",") {
@@ -232,7 +262,9 @@ func buildSources(list string) ([]ingest.Source, error) {
 			if err := need(seoulKey, "SEOUL_OPENAPI_KEY"); err != nil {
 				return nil, err
 			}
-			out = append(out, sources.NewSeoulCulture(seoulKey))
+			sc := sources.NewSeoulCulture(seoulKey)
+			sc.RetainEndedDays = retainDays
+			out = append(out, sc)
 		case "seoul_reservation":
 			if err := need(seoulKey, "SEOUL_OPENAPI_KEY"); err != nil {
 				return nil, err
@@ -242,7 +274,9 @@ func buildSources(list string) ([]ingest.Source, error) {
 			if err := need(dataKey, "DATA_GO_KR_SERVICE_KEY"); err != nil {
 				return nil, err
 			}
-			out = append(out, sources.NewTourAPI(dataKey))
+			ta := sources.NewTourAPI(dataKey)
+			ta.RetainEndedDays = retainDays
+			out = append(out, ta)
 		case "cultureinfo":
 			if err := need(dataKey, "DATA_GO_KR_SERVICE_KEY"); err != nil {
 				return nil, err

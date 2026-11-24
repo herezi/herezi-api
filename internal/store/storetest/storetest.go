@@ -270,4 +270,50 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 	})
+
+	t.Run("prune ended keeps retained", func(t *testing.T) {
+		now := time.Now()
+		end := func(t time.Time) *time.Time { return &t }
+		recent := Fixtures()[0]
+		recent.ID, recent.SourceID, recent.Title = "test:ended-recent", "ended-recent", "30일 전 끝남"
+		recent.StartsAt, recent.EndsAt = now.AddDate(0, 0, -40), end(now.AddDate(0, 0, -30))
+		old := recent
+		old.ID, old.SourceID, old.Title = "test:ended-old", "ended-old", "100일 전 끝남"
+		old.StartsAt, old.EndsAt = now.AddDate(0, 0, -110), end(now.AddDate(0, 0, -100))
+		for _, sp := range []domain.Spot{recent, old} {
+			if err := s.UpsertSpot(ctx, sp); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n, err := s.PruneEnded(ctx, now.AddDate(0, 0, -90))
+		if err != nil || n != 1 {
+			t.Fatalf("pruned %d, %v", n, err)
+		}
+		if _, err := s.SpotByID(ctx, old.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("old: err = %v", err)
+		}
+		got, err := s.SpotByID(ctx, recent.ID)
+		if err != nil || !got.Ended(now) {
+			t.Fatalf("recent: %+v, %v (보존 기간 안의 끝난 항목은 상세로 조회된다)", got, err)
+		}
+		// 목록에는 나오지 않는다.
+		list, err := s.NearbySpots(ctx, store.NearbyQuery{
+			SpotFilter: store.SpotFilter{From: now.AddDate(-1, 0, 0), To: now.AddDate(1, 0, 0), Now: now},
+			Lat:        recent.Lat, Lng: recent.Lng, RadiusM: 1000, Limit: 100,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sp := range list {
+			if sp.ID == recent.ID {
+				t.Errorf("ended spot listed")
+			}
+		}
+		if n, err := s.DeleteSpots(ctx, []string{recent.ID, "test:nope"}); err != nil || n != 1 {
+			t.Fatalf("deleted %d, %v", n, err)
+		}
+		if n, err := s.DeleteSpots(ctx, nil); err != nil || n != 0 {
+			t.Fatalf("empty delete %d, %v", n, err)
+		}
+	})
 }

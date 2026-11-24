@@ -17,18 +17,20 @@ import (
 // TourAPIBase는 한국관광공사 국문 관광정보 서비스_GW(KorService2).
 const TourAPIBase = "https://apis.data.go.kr/B551011/KorService2"
 
-// TourAPI는 searchFestival2(서울, lDongRegnCd=11)로 축제·공연·행사 목록을 받고, 끝나지 않은 항목만
+// TourAPI는 searchFestival2(서울, lDongRegnCd=11)로 축제·공연·행사 목록을 받고(끝난 지 90일 이내 포함), 끝나지 않은 항목만
 // detailCommon2(개요·홈페이지)·detailIntro2(이용요금)를 부른다. 개발계정 1,000회/일이라 호출을 아낀다.
 type TourAPI struct {
 	Key      string // data.go.kr 일반 인증키(Decoding)
 	BaseURL  string
 	Lookback int  // 시작일 기준 며칠 전부터 목록을 받을지(진행 중 장기 행사 포함). 기본 400
 	Details  bool // 상세(개요·요금) 호출 여부
+	// RetainEndedDays: 끝난 지 이 일수 이내인 항목은 유지한다(상세 호출은 진행 중·예정 항목만).
+	RetainEndedDays int
 }
 
 // NewTourAPI는 기본 설정으로 수집기를 만든다.
 func NewTourAPI(key string) *TourAPI {
-	return &TourAPI{Key: key, BaseURL: TourAPIBase, Lookback: 400, Details: true}
+	return &TourAPI{Key: key, BaseURL: TourAPIBase, Lookback: 400, Details: true, RetainEndedDays: ingest.DefaultRetainEndedDays}
 }
 
 // Name implements ingest.Source.
@@ -224,7 +226,7 @@ func (s *TourAPI) Fetch(ctx context.Context, now time.Time) ([]Record, int, map[
 		fetched += len(items)
 		for _, it := range items {
 			r := tourRecord(it, now)
-			if r.Spot.Ended(now) { // 상세 호출을 아끼려고 여기서 거른다
+			if ingest.Expired(r.Spot, now, s.RetainEndedDays) {
 				dropped[ingest.DropEnded]++
 				continue
 			}
@@ -240,6 +242,9 @@ func (s *TourAPI) Fetch(ctx context.Context, now time.Time) ([]Record, int, map[
 	for i := range recs {
 		if ctx.Err() != nil {
 			return recs, fetched, dropped, ctx.Err()
+		}
+		if recs[i].Spot.Ended(now) {
+			continue // 끝난 항목(보존 기간 안)은 상세 호출을 아낀다
 		}
 		id := recs[i].Spot.SourceID
 		common, _, err := s.call(ctx, "detailCommon2", url.Values{"contentId": {id}})

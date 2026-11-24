@@ -195,7 +195,7 @@ func (s *Store) SpotByID(ctx context.Context, id string) (domain.Spot, error) {
 // upsertColumns are overwritten when (source, source_id) already exists.
 var upsertColumns = []string{
 	"title", "summary", "category", "geog", "address", "place_name",
-	"starts_at", "ends_at", "is_free", "image_url", "source_url", "fetched_at", "content_hash",
+	"starts_at", "ends_at", "is_free", "image_url", "source_url", "fetched_at", "content_hash", "last_seen_at",
 }
 
 // UpsertSpot implements store.SpotWriter. A zero FetchedAt becomes now.
@@ -211,6 +211,7 @@ func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
 		"starts_at": sp.StartsAt, "ends_at": sp.EndsAt, "is_free": sp.IsFree,
 		"image_url": sp.ImageURL, "source_url": sp.SourceURL, "fetched_at": sp.FetchedAt,
 		"content_hash": sp.ContentHash,
+		"last_seen_at": gorm.Expr("now()"), // 수집에서 마지막으로 본 시각(원천에서 빠져도 행은 남긴다)
 	}
 	err := s.db.WithContext(ctx).Model(&spotRow{}).
 		Clauses(clause.OnConflict{
@@ -223,6 +224,27 @@ func (s *Store) UpsertSpot(ctx context.Context, sp domain.Spot) error {
 		return fmt.Errorf("postgres: upsert spot %s: %w", sp.ID, err)
 	}
 	return nil
+}
+
+// PruneEnded implements store.SpotWriter: ends_at < before인 행을 지운다.
+func (s *Store) PruneEnded(ctx context.Context, before time.Time) (int, error) {
+	res := s.db.WithContext(ctx).Where("ends_at < ?", before).Delete(&spotRow{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("postgres: prune ended: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
+// DeleteSpots implements store.SpotWriter.
+func (s *Store) DeleteSpots(ctx context.Context, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&spotRow{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("postgres: delete spots: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
 }
 
 // EnrichedSpots는 GPT 보강 결과가 있는(content_hash와 요약이 채워진) 항목을 모두 돌려준다.

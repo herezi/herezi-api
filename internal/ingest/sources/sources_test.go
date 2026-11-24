@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -84,13 +85,14 @@ func TestSeoulCultureFetchPagesAndHidesKey(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		_, _ = w.Write(fixture(t, "seoul_culture.json"))
+		// 3번째 항목을 2026-06-01(보존 기간 90일 지남)에 끝난 것으로 바꾼다.
+		_, _ = w.Write(bytes.ReplaceAll(fixture(t, "seoul_culture.json"), []byte("2026-12-26 00:00:00.0"), []byte("2026-06-01 00:00:00.0")))
 	}))
 	defer srv.Close()
-	s := &SeoulCulture{Key: "test-key", BaseURL: srv.URL}
-	recs, fetched, _, err := s.Fetch(context.Background(), fetchedAt)
-	if err != nil || fetched != 3 || len(recs) != 3 {
-		t.Fatalf("fetched=%d len=%d err=%v", fetched, len(recs), err)
+	s := &SeoulCulture{Key: "test-key", BaseURL: srv.URL, RetainEndedDays: 90}
+	recs, fetched, dropped, err := s.Fetch(context.Background(), fetchedAt)
+	if err != nil || fetched != 3 || len(recs) != 2 || dropped[ingest.DropEnded] != 1 {
+		t.Fatalf("fetched=%d len=%d dropped=%v err=%v", fetched, len(recs), dropped, err)
 	}
 	if len(paths) != 1 || paths[0] != "/test-key/json/culturalEventInfo/1/1000/" {
 		t.Fatalf("paths = %v", paths)

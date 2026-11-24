@@ -40,8 +40,11 @@ type Pipeline struct {
 	MaxGPTCalls   int // 요청 수 상한(배치 하나 = 1회)
 	BatchSize     int // 요청 하나에 넣을 항목 수
 	HorizonDays   int // 시작이 이보다 먼 미래면 제외(0 = 제한 없음)
-	Now           func() time.Time
-	Log           *slog.Logger
+	// RetainEndedDays는 끝난 항목을 유지하는 기간(일). 종료 후 이 기간이 지난 항목만 제외한다(0 = 끝나면 제외).
+	// 끝났지만 보존 기간 안인 항목은 저장하되(상세·저장 목록용) GPT는 쓰지 않는다.
+	RetainEndedDays int
+	Now             func() time.Time
+	Log             *slog.Logger
 }
 
 // SourceReport는 소스별 실행 결과.
@@ -70,6 +73,7 @@ type Report struct {
 	PromptTokens     int
 	CompletionTokens int
 	Total            int
+	EndedKept        int                     // 저장한 Spot 중 이미 끝난 항목(보존 기간 안)
 	Categories       map[domain.Category]int // 저장한 Spot의 카테고리별 수
 }
 
@@ -157,12 +161,15 @@ func (p *Pipeline) Run(ctx context.Context) Result {
 	for _, sp := range spots {
 		byName[sp.Source].Kept++
 		rep.Categories[sp.Category]++
+		if sp.Ended(now) {
+			rep.EndedKept++
+		}
 	}
 	rep.Total = len(spots)
 	return Result{Spots: spots, Excluded: excluded, Report: rep}
 }
 
-// filter: 필수 필드·끝남·너무 먼 미래·소스 안 중복 ID·볼거리 아님(제목 규칙)을 거른다.
+// filter: 필수 필드·보존 기간 지난 종료·너무 먼 미래·소스 안 중복 ID·볼거리 아님(제목 규칙)을 거른다.
 // 좌표 검사는 지오코딩 뒤에. 볼거리 여부가 애매한 항목은 AttractionMaybe로 표시한다(→ GPT).
 func (p *Pipeline) filter(recs []Record, now time.Time, sr *SourceReport, excluded *[]Excluded) []Record {
 	seen := map[string]bool{}
@@ -179,7 +186,7 @@ func (p *Pipeline) filter(recs []Record, now time.Time, sr *SourceReport, exclud
 			continue
 		}
 		seen[s.ID] = true
-		if s.Ended(now) {
+		if Expired(*s, now, p.RetainEndedDays) {
 			sr.Dropped[DropEnded]++
 			continue
 		}
@@ -473,6 +480,10 @@ func (p *Pipeline) enrich(ctx context.Context, recs []Record, byName map[string]
 		if sp.Summary == "" {
 			sp.ContentHash = hash // 요약이 없으면 캐시되지 않는다(cmd/ingest는 요약 있는 것만 캐시)
 		}
+		if sp.Ended(now) {
+			spots[i] = sp // 끝난 항목(보존 기간 안)은 GPT를 쓰지 않는다
+			continue
+		}
 		spots[i], items[i] = sp, it
 		queue = append(queue, i)
 	}
@@ -582,7 +593,7 @@ func (r Report) String() string {
 		drops = append(drops, fmt.Sprintf("%s=%d", k, totals[k]))
 	}
 	fmt.Fprintf(&b, "dropped: %s\ncategories: %s\n", strings.Join(drops, " "), strings.Join(cats, " "))
-	fmt.Fprintf(&b, "total kept=%d  geocode_calls=%d  place_calls=%d  gpt_calls=%d (errors %d) gpt_items=%d  tokens in=%d out=%d\n",
-		r.Total, r.GeocodeCalls, r.PlaceCalls, r.GPTCalls, r.GPTErrors, r.GPTItems, r.PromptTokens, r.CompletionTokens)
+	fmt.Fprintf(&b, "total kept=%d (ended_kept=%d)  geocode_calls=%d  place_calls=%d  gpt_calls=%d (errors %d) gpt_items=%d  tokens in=%d out=%d\n",
+		r.Total, r.EndedKept, r.GeocodeCalls, r.PlaceCalls, r.GPTCalls, r.GPTErrors, r.GPTItems, r.PromptTokens, r.CompletionTokens)
 	return b.String()
 }

@@ -43,6 +43,34 @@ func (s *Store) UpsertSpot(_ context.Context, sp domain.Spot) error {
 	return nil
 }
 
+// PruneEnded implements store.SpotWriter.
+func (s *Store) PruneEnded(_ context.Context, before time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id, sp := range s.spots {
+		if sp.Ended(before) {
+			delete(s.spots, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// DeleteSpots implements store.SpotWriter.
+func (s *Store) DeleteSpots(_ context.Context, ids []string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, id := range ids {
+		if _, ok := s.spots[id]; ok {
+			delete(s.spots, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 // SpotByID returns store.ErrNotFound when missing. Ended spots are returned.
 func (s *Store) SpotByID(_ context.Context, id string) (domain.Spot, error) {
 	s.mu.RLock()
