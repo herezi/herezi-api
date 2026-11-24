@@ -121,6 +121,7 @@ func TestMeRequiresAuth(t *testing.T) {
 		{http.MethodPut, "/v1/me/saved/test:mid-popup"},
 		{http.MethodDelete, "/v1/me/saved/test:mid-popup"},
 		{http.MethodPost, "/v1/me/saved:import"},
+		{http.MethodDelete, "/v1/me"},
 	} {
 		for _, tc := range []struct {
 			name, header string

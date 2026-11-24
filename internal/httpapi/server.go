@@ -28,6 +28,7 @@ type Server struct {
 	geocoder geo.ReverseGeocoder // nil이면 /v1/geo/reverse는 501
 	auth     auth.Verifier       // nil이면 /v1/me/*는 503 auth_not_configured
 	saved    store.SavedStore    // nil이면 /v1/me/saved*는 503 auth_not_configured
+	users    auth.UserDeleter    // nil이면 DELETE /v1/me는 503 auth_not_configured
 	log      *slog.Logger
 	now      func() time.Time
 }
@@ -60,6 +61,7 @@ func (s *Server) Routes() []Route {
 		{http.MethodPost, "/v1/me/saved:import", s.authed(s.importSaved)},
 		{http.MethodPut, "/v1/me/saved/{spot_id}", s.authed(s.putSaved)},
 		{http.MethodDelete, "/v1/me/saved/{spot_id}", s.authed(s.deleteSaved)},
+		{http.MethodDelete, "/v1/me", s.authed(s.deleteMe)},
 	}
 }
 

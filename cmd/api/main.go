@@ -11,6 +11,8 @@
 //   - SUPABASE_URL: Supabase 프로젝트 URL(https://<ref>.supabase.co). 로그인 토큰(JWT)을 이 프로젝트의
 //     JWKS로 검증한다(iss = SUPABASE_URL/auth/v1). 없으면 /v1/me/*는 503 auth_not_configured.
 //   - SUPABASE_JWT_SECRET: (선택) 레거시 HS256 JWT 비밀값. 있으면 HS256 토큰도 받는다.
+//   - SUPABASE_SERVICE_ROLE_KEY: 서비스 역할 키(회원 탈퇴 때 Supabase Admin API로 사용자 삭제).
+//     없으면 DELETE /v1/me는 503 auth_not_configured.
 //
 // 비밀값은 로그에 남기지 않는다(설정 여부만).
 //
@@ -99,6 +101,12 @@ func run(log *slog.Logger) error {
 		secret := os.Getenv("SUPABASE_JWT_SECRET")
 		opts = append(opts, httpapi.WithAuth(auth.NewSupabase(auth.SupabaseConfig{URL: u, JWTSecret: secret})))
 		log.Info("auth: supabase", "hs256", secret != "")
+		if key := os.Getenv("SUPABASE_SERVICE_ROLE_KEY"); key != "" {
+			opts = append(opts, httpapi.WithUserDeleter(auth.NewSupabaseAdmin(u, key, nil)))
+			log.Info("account deletion: supabase admin")
+		} else {
+			log.Warn("account deletion: disabled (SUPABASE_SERVICE_ROLE_KEY not set), DELETE /v1/me returns 503")
+		}
 	} else {
 		log.Warn("auth: disabled (SUPABASE_URL not set), /v1/me/* returns 503")
 	}

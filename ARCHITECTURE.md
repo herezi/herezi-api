@@ -60,7 +60,9 @@
 - 저장소: `store.SavedStore`(메모리·postgres, `storetest.RunSaved` 공통 스위트). 테이블 `saved_spots`(migrations/00007, PK(user_id, spot_id),
   `spot_id` → `spots(id) ON DELETE CASCADE`). 수집 배치가 종료 후 90일 지난 볼거리를 정리하면 저장 행도 사라진다. 목록은 정리 전이라도
   보존 기간(`domain.RetainEndedDays`)이 지난 항목을 뺀다. 사용자당 500개(`store.MaxSavedPerUser`) — 넘으면 409.
-- `cmd/api`가 `SUPABASE_URL`이 있을 때만 `httpapi.WithAuth`를 꽂는다. 핸들러 테스트는 가짜 `Verifier`, 검증기 테스트는 테스트용 키쌍 + 가짜 JWKS 서버.
+- 회원 탈퇴 `DELETE /v1/me`: ① `auth.SupabaseAdmin`(`SUPABASE_SERVICE_ROLE_KEY`)으로 `DELETE /auth/v1/admin/users/{id}` → ② 성공하면 `DeleteUserSaved` → 204.
+  ①이 실패하면 502이고 저장은 남는다. ①이 404(이미 없음)면 성공으로 본다 — ②가 실패해 500을 받은 앱이 같은 토큰으로 재시도하면 정리가 끝난다.
+- `cmd/api`가 `SUPABASE_URL`이 있을 때만 `httpapi.WithAuth`를, `SUPABASE_SERVICE_ROLE_KEY`도 있을 때만 `httpapi.WithUserDeleter`를 꽂는다. 핸들러 테스트는 가짜 `Verifier`, 검증기 테스트는 테스트용 키쌍 + 가짜 JWKS 서버.
 
 ## 계약과 테스트
 - `api/openapi.yaml`이 단일 기준. `internal/httpapi/contract_test.go`가 카테고리 enum, `when` enum, 라우트 목록, 응답 JSON 필드를 대조한다.
