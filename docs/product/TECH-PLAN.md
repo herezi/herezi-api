@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.2 (2026-11-20) |
+| 버전 | v1.3 (2026-11-24) |
 | 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.0, [DATA-PLAN.md](DATA-PLAN.md) |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
@@ -21,7 +21,7 @@
  네이버 지오코딩 ─────▶└────────────┘                          └──────────┘
 ```
 
-- **api**: 읽기 전용 REST. 앱은 위치·필터로 근처 항목을 조회만 한다. 가입·쓰기 없음(M1).
+- **api**: REST. 볼거리 조회는 인증 없이, **저장 목록(`/v1/me/saved`)만 로그인 사용자 토큰 필요**.
 - **ingest**: 소스별 수집기 → 정규화 → 지오코딩 → GPT 보강(요약·분류) → 중복 제거 → 저장. 주기 실행 배치.
 - **계약**: `api/openapi.yaml`이 단일 기준. 앱 레포는 `make sync-api`로 복사해서 사용.
 
@@ -71,6 +71,19 @@
 - 인증 없음. 대신 앱별 API 키 헤더 + IP 기준 속도 제한.
 - 응답 캐시: `Cache-Control: max-age=60`.
 
+## 4.1 인증·저장 (v1.3)
+
+| 항목 | 결정 |
+|---|---|
+| 로그인 | 카카오, Apple (필수 둘 다). 앱이 각 SDK로 로그인 → **Supabase Auth**에 ID 토큰으로 로그인(`signInWithIdToken`, provider kakao/apple) → Supabase 세션(JWT) |
+| API 인증 | `Authorization: Bearer <Supabase JWT>`. API는 Supabase JWKS로 서명·만료 검증, `sub`=user_id. 조회 API는 인증 불필요 |
+| 저장 테이블 | `saved_spots(user_id uuid, spot_id text, saved_at timestamptz, PK(user_id, spot_id))` + RLS(본인 행만). API는 서비스 역할로 접근 |
+| 엔드포인트 | `GET /v1/me/saved`(스팟 스냅샷 포함, 끝난 항목 `is_ended`), `PUT /v1/me/saved/{spot_id}`, `DELETE /v1/me/saved/{spot_id}`, `DELETE /v1/me`(회원 탈퇴: 저장 삭제 + Supabase 사용자 삭제) |
+| 기기 로컬 저장 | 로그인 전 저장 시도는 로그인 시트를 띄움. 기존 로컬 저장분은 첫 로그인 때 계정으로 옮기고 로컬 삭제 |
+| 끝난 볼거리 | 종료 후 90일 보존(상세·저장 목록에서 '종료됨'), 이후 정리. 저장 목록에서도 사라짐 |
+| 앱스토어 | 앱 안 회원 탈퇴 필수, Apple 로그인 필수(소셜 로그인 제공 시). Apple Developer 계정 필요 |
+| 개인정보 | 수집 항목 추가(카카오/Apple 계정 식별자, 이메일은 받지 않음 기본) → 처리방침 갱신 필요 |
+
 ## 5. 인프라
 
 | 항목 | 선택 | 이유 |
@@ -115,3 +128,4 @@
 | 2026-11-20 | v1.0 | 작성 및 승인 |
 | 2026-11-20 | v1.1 | DB 접근을 sqlc → GORM으로 변경 ([ADR 0002](../adr/0002-gorm.md)) |
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
+| 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
