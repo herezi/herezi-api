@@ -75,8 +75,13 @@ type SpotReader interface {
 
 // SpotWriter is what the ingest pipeline needs.
 // FetchedAt가 비어 있으면 구현체가 현재 시각으로 채운다.
+// 원천 목록에서 빠졌다는 이유로는 지우지 않는다. 끝난 지 오래된 항목만 PruneEnded로 정리한다(이슈 #51).
 type SpotWriter interface {
 	UpsertSpot(ctx context.Context, s domain.Spot) error
+	// PruneEnded는 ends_at < before인 항목을 지우고 지운 수를 돌려준다(종료 후 보존 기간이 지난 항목).
+	PruneEnded(ctx context.Context, before time.Time) (int, error)
+	// DeleteSpots는 ID로 지운다(수집 규칙·GPT가 볼거리가 아니라고 판정한 항목). 없는 ID는 무시한다.
+	DeleteSpots(ctx context.Context, ids []string) (int, error)
 }
 
 // SpotStore is the full store.

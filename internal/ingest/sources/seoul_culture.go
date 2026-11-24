@@ -26,11 +26,13 @@ const seoulPageSize = 1000
 type SeoulCulture struct {
 	Key     string
 	BaseURL string // 테스트에서 httptest 서버로 바꾼다
+	// RetainEndedDays: END_DATE가 오늘−이 일수보다 이른 항목은 싣지 않는다(과거 약 2만 건 제외).
+	RetainEndedDays int
 }
 
-// NewSeoulCulture는 기본 호스트로 수집기를 만든다.
+// NewSeoulCulture는 기본 호스트·보존 기간(90일)으로 수집기를 만든다.
 func NewSeoulCulture(key string) *SeoulCulture {
-	return &SeoulCulture{Key: key, BaseURL: SeoulOpenAPIBase}
+	return &SeoulCulture{Key: key, BaseURL: SeoulOpenAPIBase, RetainEndedDays: ingest.DefaultRetainEndedDays}
 }
 
 // Name implements ingest.Source.
@@ -193,26 +195,37 @@ func seoulCultureRecord(r seoulCultureRow, fetchedAt time.Time) Record {
 	}
 }
 
-// Fetch implements ingest.Source: 전체(종료 포함 약 2만 건)를 1,000건씩 받는다.
+// Fetch implements ingest.Source: 전체(종료 포함 약 2만 건)를 1,000건씩 받아 END_DATE가 보존 기간 안인
+// 항목만 돌려준다. API에 종료일 조건이 없고 시작일 내림차순이라, 몇 년 전에 시작한 장기 상설 행사가 뒤쪽
+// 페이지에 섞여 있어 중간에 멈추지 않고 끝까지 받는다(약 20회 호출).
 func (s *SeoulCulture) Fetch(ctx context.Context, now time.Time) ([]Record, int, map[string]int, error) {
 	var all []Record
+	fetched := 0
+	dropped := map[string]int{}
 	total := -1
 	for start := 1; total < 0 || start <= total; start += seoulPageSize {
 		body, err := s.page(ctx, "culturalEventInfo", start, start+seoulPageSize-1)
 		if err != nil {
-			return all, len(all), nil, fmt.Errorf("seoul_culture page %d: %w", start, err)
+			return all, fetched, dropped, fmt.Errorf("seoul_culture page %d: %w", start, err)
 		}
 		recs, t, err := ParseSeoulCulture(body, now)
 		if err != nil {
-			return all, len(all), nil, fmt.Errorf("seoul_culture page %d: %w", start, err)
+			return all, fetched, dropped, fmt.Errorf("seoul_culture page %d: %w", start, err)
 		}
 		total = t
-		all = append(all, recs...)
+		fetched += len(recs)
+		for _, r := range recs {
+			if ingest.Expired(r.Spot, now, s.RetainEndedDays) {
+				dropped[ingest.DropEnded]++
+				continue
+			}
+			all = append(all, r)
+		}
 		if len(recs) == 0 {
 			break
 		}
 	}
-	return all, len(all), nil, nil
+	return all, fetched, dropped, nil
 }
 
 func (s *SeoulCulture) page(ctx context.Context, service string, start, end int) ([]byte, error) {

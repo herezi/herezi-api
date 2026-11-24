@@ -24,7 +24,7 @@ Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
 ```
 api/openapi.yaml            API 계약 (단일 기준)
 cmd/api/                    API 서버 진입점 (환경 변수 → 저장소 선택 → HTTP)
-cmd/ingest/                 수집 배치 진입점 (-sources, -max-gpt, -out, -dry-run, -excluded-cache, -show-excluded)
+cmd/ingest/                 수집 배치 진입점 (-sources, -max-gpt, -out, -dry-run, -retain-ended-days, -excluded-cache, -show-excluded)
 internal/domain/            핵심 타입·규칙 (Spot, Category, When, 거리). 다른 internal 패키지 import 금지
 internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, NearbyQuery)
 internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 때) + 서울 예시 데이터

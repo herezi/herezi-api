@@ -62,9 +62,10 @@
 
 ## 수집 배치: `cmd/ingest` (이슈 #42)
 ```
-sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖·90일 넘는 미래) ─▶ 좌표 보강(장소명 색인 → 네이버 Geocoding → 카카오 키워드)
+sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(종료 후 90일 지남·서울 밖·90일 넘는 미래) ─▶ 좌표 보강(장소명 색인 → 네이버 Geocoding → 카카오 키워드)
    ─▶ Dedup(정규화 제목 + 기간 겹침 + 100m, 이미지·원본 좌표 있는 쪽이 대표) ─▶ GPT 보강(content_hash 캐시, 요청 수 상한, 배치 JSON)
-   ─▶ Sink: DATABASE_URL 있으면 postgres.UpsertSpot, 없으면 snapshot.Write(-out)
+   ─▶ Sink: DATABASE_URL 있으면 postgres.UpsertSpot + DeleteSpots(볼거리 아님) + PruneEnded(종료 후 90일 지남),
+            없으면 MergeRetained(이전 스냅샷 중 안 보인 항목 유지) → snapshot.Write(-out)
 ```
 - `internal/ingest`: `Source` 인터페이스, `Record`(정규화 Spot + 원천 분류·설명·요금 텍스트), 정규화 도우미(날짜·HTML·무료 규칙·키워드 분류), `Dedup`, `Pipeline`, `Enricher` 인터페이스.
 - `internal/ingest/sources`: 소스별 수집기(서울 문화행사, 공공서비스예약, TourAPI, 문화포털)와 원천 분류 → 9개 카테고리 매핑 표. 파서는 `testdata/` 실제 응답 픽스처로 테스트.
@@ -72,4 +73,5 @@ sources.*.Fetch ─▶ ingest.Record ─▶ Pipeline: 필터(끝남·서울 밖�
 - GPT 캐시: `domain.Spot.ContentHash`(원문 해시). postgres는 `content_hash` 컬럼(`EnrichedSpots`), 스냅샷은 이전 `-out` 파일을 읽어 해시가 같으면 재호출하지 않는다.
 - `cmd/api`는 `DATABASE_URL`이 없고 `SNAPSHOT_PATH`가 있으면 스냅샷을 메모리 저장소에 올린다. httpapi는 ingest 쪽을 import하지 않는다.
 - 좌표 보강 순서: ① 같은 구·같은 장소명의 다른 항목 좌표 ② 네이버 Geocoding(주소) ③ 카카오 키워드 검색(`geo.KakaoPlaces`, `KAKAO_REST_API_KEY`, "장소명 구", 서울 rect, 괄호·세부 공간을 줄인 이름 최대 3개). 카카오 후보는 서울 안 + 이름 유사도(`ingest.SimilarPlaceName`: 포함 또는 bigram Dice ≥ 0.5)를 통과한 첫 건만 쓴다. 질의 결과는 실행 동안 캐시하고, 찾은 좌표는 장소명 색인에 넣어 재사용한다.
+- **끝난 항목 보존(이슈 #51)**: 종료 후 `-retain-ended-days`(기본 90일) 동안 저장해 상세(`is_ended: true`)·저장 목록에서 보여 준다. 목록·지도·검색은 계속 제외. 원천 목록에서 빠져도 지우지 않고(DB는 `last_seen_at` 갱신만 멈춤, 스냅샷은 이전 스냅샷에서 유지), 보존 기간이 지난 행만 정리한다. 끝난 항목에는 GPT를 쓰지 않는다. 서울 문화행사는 END_DATE가 보존 기간 안인 항목만 싣는다.
 - 외부 호출 에러에는 URL(키·주소)을 넣지 않는다(`url.Error`를 풀고 HTTP 상태만).
