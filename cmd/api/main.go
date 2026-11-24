@@ -2,7 +2,9 @@
 //
 // 환경 변수:
 //   - PORT: 기본 8080
-//   - DATABASE_URL: PostgreSQL(PostGIS) 접속 문자열. 없으면 예시 데이터가 든 메모리 저장소로 뜬다.
+//   - DATABASE_URL: PostgreSQL(PostGIS) 접속 문자열. 없으면 메모리 저장소로 뜬다.
+//   - SNAPSHOT_PATH: DATABASE_URL이 없을 때 메모리 저장소에 올릴 수집 스냅샷(cmd/ingest -out).
+//     없으면 예시 데이터(seed).
 //   - NCP_MAPS_CLIENT_ID / NCP_MAPS_CLIENT_SECRET: 네이버 클라우드 Maps 키(역지오코딩).
 //     없으면 /v1/geo/reverse는 501.
 //
@@ -19,8 +21,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/herezi/herezi-api/internal/config"
 	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/httpapi"
+	"github.com/herezi/herezi-api/internal/snapshot"
 	"github.com/herezi/herezi-api/internal/store"
 	"github.com/herezi/herezi-api/internal/store/memory"
 	"github.com/herezi/herezi-api/internal/store/postgres"
@@ -38,7 +42,7 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if n, err := loadDotEnv(".env"); err != nil {
+	if n, err := config.LoadDotEnv(".env"); err != nil {
 		return err
 	} else if n > 0 {
 		log.Info("loaded .env", "vars", n) // 값은 남기지 않는다
@@ -53,9 +57,16 @@ func run(log *slog.Logger) error {
 		defer func() { _ = pg.Close() }()
 		spots = pg
 		log.Info("store: postgres")
+	} else if path := os.Getenv("SNAPSHOT_PATH"); path != "" {
+		snap, generatedAt, err := snapshot.Read(path)
+		if err != nil {
+			return err
+		}
+		spots = memory.New(snap...)
+		log.Info("store: memory from snapshot", "spots", len(snap), "generated_at", generatedAt)
 	} else {
 		spots = memory.New(memory.SeedSeoul(time.Now())...)
-		log.Warn("store: memory with seed data (DATABASE_URL not set)")
+		log.Warn("store: memory with seed data (DATABASE_URL and SNAPSHOT_PATH not set)")
 	}
 
 	var opts []httpapi.Option

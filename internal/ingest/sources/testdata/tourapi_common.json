@@ -1,0 +1,47 @@
+{
+ "response": {
+  "header": {
+   "resultCode": "0000",
+   "resultMsg": "OK"
+  },
+  "body": {
+   "items": {
+    "item": [
+     {
+      "contentid": "3379778",
+      "contenttypeid": "15",
+      "title": "가락 옥토버페스트",
+      "createdtime": "20241004095015",
+      "modifiedtime": "20261006091502",
+      "tel": "02-3435-1000",
+      "telname": "서울시농수산식품공사",
+      "homepage": "https://www.garak.co.kr/",
+      "firstimage": "https://tong.visitkorea.or.kr/cms/resource/73/3553073_image2_1.png",
+      "firstimage2": "https://tong.visitkorea.or.kr/cms/resource/73/3553073_image3_1.png",
+      "cpyrhtDivCd": "Type3",
+      "areacode": "",
+      "sigungucode": "",
+      "lDongRegnCd": "11",
+      "lDongSignguCd": "710",
+      "lclsSystm1": "EV",
+      "lclsSystm2": "EV01",
+      "lclsSystm3": "EV010600",
+      "cat1": "",
+      "cat2": "",
+      "cat3": "",
+      "addr1": "서울특별시 송파구 양재대로 932 (가락동)",
+      "addr2": "가락몰 3층 하늘공원",
+      "zipcode": "05699",
+      "mapx": "127.1107532009",
+      "mapy": "37.4960246566",
+      "mlevel": "6",
+      "overview": "선선한 가을바람이 불어오는 계절, 가락시장의 대표 가을 축제인 ‘제3회 가락 옥토버페스트’가 마침내 막을 올린다. 맛있는 먹거리와 시원한 수제맥주, 감성 넘치는 즐길 거리로 가득 채워질 가락몰에서 가을밤의 낭만을 만끽할 수 있는 기회다. 행사는 2026년 10월 16일(금)부터 10월 18일(일)까지 3일간, 매일 오후 4시부터 밤 10시까지 가락몰 3층 하늘공원에서 펼쳐진다. 입장료는 전액 무료이며, 마음에 드는 맥주와 안주 부스를 자유롭게 이용하는 방식이다. 이번 축제의 핵심 관전 포인트는 세 가지다. 첫째, 전국 대표 수제맥주"
+     }
+    ]
+   },
+   "numOfRows": 1,
+   "pageNo": 1,
+   "totalCount": 1
+  }
+ }
+}

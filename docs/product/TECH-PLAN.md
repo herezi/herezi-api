@@ -52,7 +52,7 @@
 - `geog geography(Point,4326)`, `address`, `place_name`
 - `starts_at`, `ends_at`, `image_url`, `source_url`
 - `dedup_key`: 정규화 제목 + 기간 + 반경 100m 묶음으로 소스 간 중복 제거
-- `content_hash`, `enriched_at`: GPT 재호출 방지
+- `content_hash`: GPT 재호출 방지(원문 해시, migrations/00004, 이슈 #42). `enriched_at`은 필요해지면 추가
 - `fetched_at`: 앱에 "갱신 시각"으로 표시
 
 조회 규칙: 목록(`/v1/spots`)·지도(`/v1/spots/map`)는 `ends_at < now()`인 항목을 반환하지 않는다. 상세(`/v1/spots/{id}`)는 끝난 항목도 반환하고 `is_ended: true`를 붙인다.

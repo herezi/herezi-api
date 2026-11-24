@@ -13,6 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/herezi/herezi-api/internal/domain"
 	"github.com/herezi/herezi-api/internal/store"
 	"github.com/herezi/herezi-api/internal/store/postgres"
 	"github.com/herezi/herezi-api/internal/store/storetest"
@@ -53,5 +54,44 @@ func resetSchema(t *testing.T, url string) {
 	}
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatalf("migrate up: %v", err)
+	}
+}
+
+// content_hash는 upsert로 저장되고, EnrichedSpots는 해시·요약이 있는 항목만 돌려준다(수집 해시 캐시).
+func TestEnrichedSpots(t *testing.T) {
+	url := os.Getenv("HEREZI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("HEREZI_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	resetSchema(t, url)
+	s, err := postgres.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	base := domain.Spot{
+		Source: "seoul_culture", Title: "t", Category: domain.CategoryFestival,
+		Lat: 37.5663, Lng: 126.9779, StartsAt: storetest.Now,
+	}
+	a, b, c := base, base, base
+	a.ID, a.SourceID, a.Summary, a.ContentHash = "seoul_culture:a", "a", "요약", "h1"
+	b.ID, b.SourceID, b.ContentHash = "seoul_culture:b", "b", "h2" // 요약 없음 → 캐시 아님
+	c.ID, c.SourceID, c.Summary = "seoul_culture:c", "c", "요약"     // 해시 없음
+	for _, sp := range []domain.Spot{a, b, c} {
+		if err := s.UpsertSpot(ctx, sp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.EnrichedSpots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != a.ID || got[0].ContentHash != "h1" {
+		t.Fatalf("got = %+v", got)
+	}
+	one, err := s.SpotByID(ctx, b.ID)
+	if err != nil || one.ContentHash != "h2" {
+		t.Fatalf("SpotByID content_hash = %q, %v", one.ContentHash, err)
 	}
 }

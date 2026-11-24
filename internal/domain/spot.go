@@ -87,6 +87,9 @@ type Spot struct {
 	SourceURL string
 	// FetchedAt is when the item was last fetched from its source (앱의 "갱신 시각").
 	FetchedAt time.Time
+	// ContentHash는 GPT 보강 입력(원문)의 해시. 같으면 이전 보강 결과(요약·분류·무료)를
+	// 재사용하고 GPT를 다시 부르지 않는다(TECH-PLAN.md §2). API 응답에는 나가지 않는다.
+	ContentHash string
 	// DistanceM is filled only by nearby queries.
 	DistanceM *int
 }
