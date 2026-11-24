@@ -28,7 +28,11 @@ type Record struct {
 	SourceCategory string // 원천 분류(예: "전시/미술", "문화체험>전시/관람") — GPT 입력·리포트용
 	Description    string // 요약 입력(태그 제거된 평문)
 	Gu             string // 자치구(지오코딩 질의 보조)
-	AddressQuery   string // 지오코딩용 주소(없으면 Gu + PlaceName)
+
+	// AttractionMaybe는 제목 규칙으로 볼거리 여부가 애매하다는 뜻 → GPT is_attraction 판정 대상.
+	// 파이프라인 필터가 AttractionRule로 채운다(소스는 비워 둔다).
+	AttractionMaybe bool
+	AddressQuery    string // 지오코딩용 주소(없으면 Gu + PlaceName)
 }
 
 // HasCoords는 원본에 좌표가 있었는지(0,0이 아닌지).

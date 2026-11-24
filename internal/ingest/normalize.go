@@ -145,8 +145,14 @@ func FreeFromFlag(flag string) *bool {
 // 키워드 재분류: 원천 분류에 없는 pet·sports·food를 제목으로 찾는다(DATA-PLAN.md §3.3).
 var (
 	petRe    = regexp.MustCompile(`반려동물|반려견|반려묘|댕댕|강아지|애견|멍멍|(^|[^가-힣])펫`) // 트럼펫·카펫 제외
-	sportsRe = regexp.MustCompile(`마라톤|러닝|런닝|레이스|걷기대회|자전거대회|체육대회|생활체육|요가|트레킹|등반대회|씨름|스포츠`)
-	foodRe   = regexp.MustCompile(`야시장|먹거리|푸드|미식|맥주|와인|막걸리|디저트|빵축제|김장|음식축제|요리`)
+	sportsRe = regexp.MustCompile(`마라톤|러닝|런닝|레이스|걷기대회|자전거대회|체육대회|생활체육|(^|[^일])요가|필라테스|트레킹|등반대회|씨름|스포츠|` +
+		`클라이밍|축구|풋살|야구|농구|배구|테니스|배드민턴|탁구|골프|게이트볼|볼링|당구|수영|스케이트|스키|라인댄스|밸리댄스|활쏘기|국궁`)
+	// 요가: "일요가족" 오분류 방지(이슈 #44).
+	// plantRe: "반려식물"은 반려동물이 아니다(이슈 #44 오분류).
+	plantRe = regexp.MustCompile(`반려\s*식물`)
+	// tourRe: 투어·해설·견학은 공연이 아니다(재판정에서 "도보관광 프로그램" → performance 오분류).
+	tourRe = regexp.MustCompile(`투어|해설|도보|견학|탐방|답사|산책`)
+	foodRe = regexp.MustCompile(`야시장|먹거리|푸드|미식|맥주|와인|막걸리|디저트|빵축제|김장|음식축제|요리`)
 )
 
 // KeywordCategory는 제목 키워드로 pet·sports·food를 판정한다. base가 festival이거나 sure가
@@ -163,4 +169,24 @@ func KeywordCategory(title string, base domain.Category, sure bool) (domain.Cate
 		return domain.CategoryFood, true
 	}
 	return base, sure
+}
+
+// AcceptGPTCategory는 GPT가 고른 카테고리를 쓸지 정한다. popup은 GPT로 정하지 않고(수기 데이터),
+// pet은 반려동물 언급이 있을 때만(반려식물 제외), sports는 운동 종목 언급이 있을 때만,
+// performance는 투어·해설·견학이 아닐 때만 받는다
+// (이슈 #44: "반려식물" → pet, "심폐소생술교육" → sports, "도보관광 프로그램" → performance 오분류).
+// 받지 않으면 규칙 카테고리를 그대로 쓴다. 캐시된 이전 판정에도 같은 검사를 한다.
+func AcceptGPTCategory(c domain.Category, title, desc string) bool {
+	text := title + " " + desc
+	switch {
+	case !c.Valid() || c == domain.CategoryPopup:
+		return false
+	case c == domain.CategoryPet:
+		return petRe.MatchString(text) && !plantRe.MatchString(title)
+	case c == domain.CategorySports:
+		return sportsRe.MatchString(text)
+	case c == domain.CategoryPerformance:
+		return !tourRe.MatchString(title)
+	}
+	return true
 }

@@ -30,11 +30,12 @@ func TestEnrichBatch(t *testing.T) {
 			t.Errorf("req = %+v", req)
 		}
 		if len(req.Messages) != 2 || !strings.Contains(req.Messages[1].Content, `"id":"a"`) ||
-			!strings.Contains(req.Messages[1].Content, `"need_free":true`) {
+			!strings.Contains(req.Messages[1].Content, `"need_free":true`) ||
+			!strings.Contains(req.Messages[1].Content, `"need_attraction":true`) {
 			t.Errorf("user message = %s", req.Messages[1].Content)
 		}
 		content := `{"items":[{"id":"a","summary":"덕수궁 돌담길을 밤에 걷는 산책 행사","category":"nature","is_free":true},` +
-			`{"id":"b","summary":"요약","category":"bogus","is_free":null}]}`
+			`{"id":"b","summary":"요약","category":"bogus","is_free":null,"is_attraction":false}]}`
 		resp := map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
 			"usage":   map[string]any{"prompt_tokens": 120, "completion_tokens": 40},
@@ -48,7 +49,7 @@ func TestEnrichBatch(t *testing.T) {
 	c.Model = "test-model"
 	res, usage, err := c.EnrichBatch(context.Background(), []ingest.EnrichItem{
 		{ID: "a", Title: "덕수궁 야간 산책", NeedCategory: true, NeedFree: true, FeeText: "무료(예약)"},
-		{ID: "b", Title: "b"},
+		{ID: "b", Title: "b", NeedAttraction: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,9 @@ func TestEnrichBatch(t *testing.T) {
 	}
 	if len(res) != 2 || res[0].Category != domain.CategoryNature || !*res[0].IsFree || res[0].Summary == "" {
 		t.Fatalf("res[0] = %+v", res[0])
+	}
+	if res[0].IsAttraction != nil || res[1].IsAttraction == nil || *res[1].IsAttraction {
+		t.Fatalf("is_attraction = %v / %v", res[0].IsAttraction, res[1].IsAttraction)
 	}
 	if res[1].Category != "" || res[1].IsFree != nil {
 		t.Fatalf("invalid category must be dropped: %+v", res[1])
