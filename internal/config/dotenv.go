@@ -11,7 +11,7 @@ import (
 
 // LoadDotEnv는 로컬 개발용으로 path(.env)의 KEY=VALUE를 환경 변수로 올린다.
 // 이미 설정된 변수는 덮어쓰지 않고, 파일이 없으면 아무것도 하지 않는다.
-// 값은 절대 로그에 남기지 않는다. 운영은 Secret Manager → 환경 변수.
+// 값은 절대 로그에 남기지 않는다. 운영은 Railway 서비스 변수 → 환경 변수.
 func LoadDotEnv(path string) (loaded int, err error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {

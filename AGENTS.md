@@ -62,7 +62,7 @@ docs/adr/                   ADR (NNNN-제목.md)
 7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 목록(`/v1/spots`)·지도(`/v1/spots/map`)에 넣지 않는다. 상세(`/v1/spots/{id}`)는 끝난 행사도 200으로 돌려주고 `is_ended: true`를 붙인다(요청 시각 기준 계산). 무료는 카테고리가 아니라 `free=true` 필터다.
 8. **DB 접근은 GORM, 스키마는 goose 마이그레이션.** 테이블·컬럼·인덱스는 `migrations/`에 새 SQL 파일로만 바꾼다. **`AutoMigrate` 금지**(PostGIS geography·GiST 인덱스를 표현할 수 없다). GORM 모델은 `internal/store/postgres` 안에만 두고 `domain`은 gorm을 import하지 않는다. 공간 조건은 raw 표현식에 `?` 바인딩으로. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
 9. **로그 규칙(위치정보).** 원좌표는 로그에 남기지 않는다([개인정보 처리방침](https://herezi.github.io/privacy/)). 접속 로그 미들웨어(`internal/httpapi/logredact.go`)가 쿼리의 `lat`·`lng`·`sw_lat`·`sw_lng`·`ne_lat`·`ne_lng`를 소수 둘째 자리(약 1km)로 줄여 기록하고(`/v1/spots`, `/v1/spots/map`, `/v1/geo/reverse` 모두), 키·토큰·비밀값으로 보이는 파라미터는 값을 지운다. 에러 로그는 `logErr`로 남겨 요청 URL(좌표 포함)을 빼고, 외부 클라이언트(예: 네이버) 에러 메시지에도 URL을 넣지 않는다. 좌표를 받는 엔드포인트를 추가하면 `coordParams`와 `logredact_test.go`에 함께 추가한다.
-10. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Secret Manager).
+10. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Railway 서비스 변수).
 11. 문서·주석은 한국어, 코드 식별자는 영어.
 
 ## 에이전트 역할

@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.3 (2026-11-24) |
+| 버전 | v1.4 (2026-11-24) |
 | 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.0, [DATA-PLAN.md](DATA-PLAN.md) |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
@@ -88,14 +88,29 @@
 
 | 항목 | 선택 | 이유 |
 |---|---|---|
-| 서버 | Google Cloud Run (서울 `asia-northeast3`) | 컨테이너, 사용량 과금, 0대까지 축소 |
-| 배치 | Cloud Run Jobs + Cloud Scheduler | `cmd/ingest`를 소스별 주기로 실행 |
-| DB | Supabase Postgres (서울 리전, PostGIS) | 관리형, 무료~저가 시작 |
-| 비밀값 | Secret Manager | API 키(TourAPI, KOPIS, 서울, 네이버, OpenAI) |
+| 서버 | **Railway** 프로젝트 `herezi` / 서비스 `api` (리전 Southeast Asia — Singapore `asia-southeast1`) | 기존 Hobby 계정(언제볼까 프로젝트와 같은 결제) 재사용. Dockerfile 배포, GitHub `develop` 연결, `/healthz` 헬스체크, `$PORT` 리슨 |
+| 배치 | Railway 서비스 `ingest` (cron `0 20 * * *` UTC = 매일 05:00 KST) | `cmd/ingest -max-gpt 100` 하루 1회 실행 후 종료. 매일 DB에 쓰므로 Supabase 비활성 일시정지도 막는다 |
+| DB | **Supabase 무료** — 조직 `herezi`, 프로젝트 `herezi`, `ap-southeast-1`(싱가포르), PostGIS·pg_trgm | 관리형 Postgres. API와 같은 리전이라 지연이 짧다. 접속은 **session pooler**(IPv4, 5432) |
+| DB 노출 차단 | public 테이블 RLS + `anon`·`authenticated` 권한 회수 (마이그레이션 00005) | 앱은 DB에 직접 붙지 않고 `cmd/api`만 쓴다. Supabase Data API로 테이블이 열리지 않게 막는다 |
+| 비밀값 | Railway 서비스 변수 | `DATABASE_URL`, `NCP_MAPS_CLIENT_ID/SECRET`, `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY`, `KAKAO_REST_API_KEY`. 로컬은 `.env`(gitignore) |
 | 이미지 | 원본 URL 사용(M1) | 저장·가공은 M2에서 필요 시 |
-| 모니터링 | Cloud Logging + 수집 결과 요약 로그, 실패 알림 | 수집 0건·급감 시 알림 |
+| 모니터링 | Railway 로그 + 수집 결과 요약 로그(리포트 표) | 수집 0건·급감은 로그로 확인(알림은 M2) |
 
-> 비용·계정 결정은 M0에서 실제 생성하며 확정한다. 바뀌면 이 표를 고친다.
+### 월 비용 추정 (M1)
+| 항목 | 추정 | 비고 |
+|---|---|---|
+| Railway Hobby | US$5 (기존 구독, 언제볼까와 공유) | 사용량 US$5까지 포함. 초과분만 추가 과금 |
+| Railway 사용량: api | 약 US$1~3 | Go 바이너리, 상시 1대, 메모리 수십 MB |
+| Railway 사용량: ingest cron | US$0.1 미만 | 하루 1회 1분 안팎 |
+| Supabase | US$0 | 무료(DB 500MB, 7일 비활성 시 일시정지) |
+| OpenAI (GPT 보강) | 약 US$0.5~2 | 해시 캐시로 새 항목만, 하루 최대 100요청 |
+| 네이버 지오코딩·카카오 키워드 | US$0 | 무료 한도 안(카카오는 앱 '급할땐'과 쿼터 공유) |
+| **합계(herezi 추가분)** | **약 US$2~5/월** | Hobby 포함 사용량이 남으면 추가 0에 가깝다 |
+
+> **Supabase 무료 플랜은 7일간 활동이 없으면 프로젝트를 일시정지한다.** 매일 05:00 KST 수집 cron이 DB에 쓰므로
+> 정상이라면 멈추지 않는다. cron이 일주일 넘게 실패하면 일시정지될 수 있으니 Railway 로그를 확인하고,
+> 멈췄으면 Supabase 대시보드에서 Restore 한다. 트래픽이 생기면 Pro(US$25/월) 전환을 검토한다.
+> 결정 근거: [ADR 0003](../adr/0003-railway-supabase.md). 배포 절차: `docs/ops/railway.md`.
 
 ## 6. 개발 방식 (하네스 엔지니어링)
 
@@ -129,3 +144,4 @@
 | 2026-11-20 | v1.1 | DB 접근을 sqlc → GORM으로 변경 ([ADR 0002](../adr/0002-gorm.md)) |
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
 | 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
+| 2026-11-24 | v1.4 | §5 인프라: GCP → Railway(API·수집 cron, 싱가포르) + Supabase 무료(조직·프로젝트 herezi, ap-southeast-1, session pooler), RLS·권한 회수(00005), 월 비용 추정, 7일 비활성 일시정지 메모 ([ADR 0003](../adr/0003-railway-supabase.md)) |
