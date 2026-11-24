@@ -22,7 +22,7 @@ const redacted = "REDACTED"
 
 func isSecretParam(name string) bool {
 	n := strings.ToLower(name)
-	for _, s := range []string{"key", "secret", "token", "password", "auth"} {
+	for _, s := range []string{"key", "secret", "token", "password", "auth", "jwt", "bearer", "credential"} {
 		if strings.Contains(n, s) {
 			return true
 		}

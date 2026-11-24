@@ -94,6 +94,10 @@ type Spot struct {
 	DistanceM *int
 }
 
+// RetainEndedDays는 끝난 볼거리를 종료 후 보존하는 기간(일). 이 기간 동안은 상세·저장 목록에서
+// '종료됨'으로 보여 주고, 지나면 수집 배치가 정리한다(TECH-PLAN.md §4.1, 이슈 #51).
+const RetainEndedDays = 90
+
 // SpotID builds the canonical spot ID.
 func SpotID(source, sourceID string) string { return source + ":" + sourceID }
 

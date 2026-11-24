@@ -37,6 +37,24 @@ func TestStore(t *testing.T) {
 	})
 }
 
+// 저장 목록(saved_spots, migrations/00007): 메모리와 같은 스위트. spots 정리·삭제 시 CASCADE도 확인한다.
+func TestSaved(t *testing.T) {
+	url := os.Getenv("HEREZI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("HEREZI_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	storetest.RunSaved(t, func(t *testing.T) storetest.SavedSpotStore {
+		resetSchema(t, url)
+		s, err := postgres.Open(ctx, url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
+}
+
 func resetSchema(t *testing.T, url string) {
 	t.Helper()
 	db, err := sql.Open("pgx", url)

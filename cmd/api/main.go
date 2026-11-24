@@ -8,6 +8,11 @@
 //     없으면 예시 데이터(seed).
 //   - NCP_MAPS_CLIENT_ID / NCP_MAPS_CLIENT_SECRET: 네이버 클라우드 Maps 키(역지오코딩).
 //     없으면 /v1/geo/reverse는 501.
+//   - SUPABASE_URL: Supabase 프로젝트 URL(https://<ref>.supabase.co). 로그인 토큰(JWT)을 이 프로젝트의
+//     JWKS로 검증한다(iss = SUPABASE_URL/auth/v1). 없으면 /v1/me/*는 503 auth_not_configured.
+//   - SUPABASE_JWT_SECRET: (선택) 레거시 HS256 JWT 비밀값. 있으면 HS256 토큰도 받는다.
+//
+// 비밀값은 로그에 남기지 않는다(설정 여부만).
 //
 // 로컬 개발: 작업 디렉터리의 .env(gitignore)가 있으면 아직 설정되지 않은 변수만 읽어 온다.
 package main
@@ -22,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/herezi/herezi-api/internal/auth"
 	"github.com/herezi/herezi-api/internal/config"
 	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/httpapi"
@@ -50,6 +56,7 @@ func run(log *slog.Logger) error {
 	}
 
 	var spots store.SpotReader
+	var saved store.SavedStore
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		if os.Getenv("MIGRATE_ON_START") == "1" {
 			n, err := postgres.Migrate(ctx, url)
@@ -63,17 +70,19 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		defer func() { _ = pg.Close() }()
-		spots = pg
+		spots, saved = pg, pg
 		log.Info("store: postgres")
 	} else if path := os.Getenv("SNAPSHOT_PATH"); path != "" {
 		snap, generatedAt, err := snapshot.Read(path)
 		if err != nil {
 			return err
 		}
-		spots = memory.New(snap...)
+		mem := memory.New(snap...)
+		spots, saved = mem, mem
 		log.Info("store: memory from snapshot", "spots", len(snap), "generated_at", generatedAt)
 	} else {
-		spots = memory.New(memory.SeedSeoul(time.Now())...)
+		mem := memory.New(memory.SeedSeoul(time.Now())...)
+		spots, saved = mem, mem
 		log.Warn("store: memory with seed data (DATABASE_URL and SNAPSHOT_PATH not set)")
 	}
 
@@ -83,6 +92,15 @@ func run(log *slog.Logger) error {
 		log.Info("geocoder: naver")
 	} else {
 		log.Warn("geocoder: disabled (NCP_MAPS_CLIENT_ID/SECRET not set), /v1/geo/reverse returns 501")
+	}
+
+	opts = append(opts, httpapi.WithSaved(saved))
+	if u := os.Getenv("SUPABASE_URL"); u != "" {
+		secret := os.Getenv("SUPABASE_JWT_SECRET")
+		opts = append(opts, httpapi.WithAuth(auth.NewSupabase(auth.SupabaseConfig{URL: u, JWTSecret: secret})))
+		log.Info("auth: supabase", "hs256", secret != "")
+	} else {
+		log.Warn("auth: disabled (SUPABASE_URL not set), /v1/me/* returns 503")
 	}
 
 	port := os.Getenv("PORT")

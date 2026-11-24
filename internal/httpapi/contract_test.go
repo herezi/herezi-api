@@ -116,6 +116,9 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 		"SpotMap":    reflect.TypeFor[spotMapJSON](),
 		"Error":      reflect.TypeFor[errorBody](),
 		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
+		// /v1/me/saved:import
+		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
+		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
 	} {
 		var got, want []string
 		for i := range typ.NumField() {
@@ -142,6 +145,9 @@ func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
 		"SpotMap":    reflect.TypeFor[spotMapJSON](),
 		"Error":      reflect.TypeFor[errorBody](),
 		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
+		// /v1/me/saved:import
+		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
+		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
 	} {
 		var got []string
 		for i := range typ.NumField() {
@@ -179,6 +185,10 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 			limits: map[string]lim{"limit": {defaultMapLimit, 1, maxMapLimit}},
 		},
 		"/v1/geo/reverse": {names: []string{"lat", "lng"}},
+		"/v1/me/saved": {
+			names:  []string{"cursor", "limit"},
+			limits: map[string]lim{"limit": {defaultSavedLimit, 1, maxSavedLimit}},
+		},
 	} {
 		var names []string
 		for _, p := range doc.Paths[path]["get"].Parameters {
@@ -213,4 +223,62 @@ func TestKeywordLengthMatchesOpenAPI(t *testing.T) {
 		return
 	}
 	t.Fatal("q not found in openapi /v1/spots")
+}
+
+// TestMeContract: /v1/me/* 는 bearerAuth를 요구하고, 가져오기 개수·spot_id 길이 한도가 코드와 같아야 한다.
+func TestMeContract(t *testing.T) {
+	b, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Security   []map[string][]string `yaml:"security"`
+			Parameters []struct {
+				Name   string `yaml:"name"`
+				Schema struct {
+					MaxLength *int `yaml:"maxLength"`
+				} `yaml:"schema"`
+			} `yaml:"parameters"`
+		} `yaml:"paths"`
+		Components struct {
+			SecuritySchemes map[string]struct {
+				Type   string `yaml:"type"`
+				Scheme string `yaml:"scheme"`
+			} `yaml:"securitySchemes"`
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					MinItems *int `yaml:"minItems"`
+					MaxItems *int `yaml:"maxItems"`
+					Items    struct {
+						MaxLength *int `yaml:"maxLength"`
+					} `yaml:"items"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if sc := doc.Components.SecuritySchemes["bearerAuth"]; sc.Type != "http" || sc.Scheme != "bearer" {
+		t.Fatalf("bearerAuth = %+v", sc)
+	}
+	for path, ops := range doc.Paths {
+		for method, op := range ops {
+			secured := len(op.Security) == 1 && op.Security[0]["bearerAuth"] != nil
+			if strings.HasPrefix(path, "/v1/me") != secured {
+				t.Errorf("%s %s: security %v (only /v1/me/* requires bearerAuth)", method, path, op.Security)
+			}
+			for _, p := range op.Parameters {
+				if p.Name == "spot_id" && (p.Schema.MaxLength == nil || *p.Schema.MaxLength != maxSpotIDLen) {
+					t.Errorf("%s %s spot_id maxLength = %v, code %d", method, path, p.Schema.MaxLength, maxSpotIDLen)
+				}
+			}
+		}
+	}
+	ids := doc.Components.Schemas["SavedImportRequest"].Properties["spot_ids"]
+	if ids.MinItems == nil || *ids.MinItems != 1 || ids.MaxItems == nil || *ids.MaxItems != maxImportIDs ||
+		ids.Items.MaxLength == nil || *ids.Items.MaxLength != maxSpotIDLen {
+		t.Fatalf("SavedImportRequest.spot_ids = %+v, code max %d / %d", ids, maxImportIDs, maxSpotIDLen)
+	}
 }
