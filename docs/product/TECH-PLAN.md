@@ -3,8 +3,8 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.5 (2026-11-24) |
-| 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.0, [DATA-PLAN.md](DATA-PLAN.md) |
+| 버전 | v1.6 (2026-11-25) |
+| 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.4, [DATA-PLAN.md](DATA-PLAN.md) v1.4 |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
 > 에이전트 규칙: 기술 선택을 바꾸려면 이 문서를 먼저 고치고 PR로 남긴다. 큰 결정은 `docs/adr/`에 ADR로 기록한다.
@@ -15,12 +15,18 @@
 
 ```
  공공데이터 API ─┐
- (TourAPI, KOPIS, │   ┌────────────┐   ┌──────────────────┐   ┌──────────┐
-  서울 열린데이터…) ├──▶│ ingest 작업 │──▶│ PostgreSQL+PostGIS │◀──│ api 서버  │◀── iOS / Android 앱
- OpenAI GPT ──────┘   │ (주기 실행) │   └──────────────────┘   │ (Go)     │
- 네이버 지오코딩 ─────▶└────────────┘                          └──────────┘
+ (TourAPI,        │   ┌────────────┐   ┌──────────────────┐   ┌──────────────────┐  지역 파일(gzip·ETag)  ┌──────────────────────┐
+  서울 열린데이터…) ├──▶│ ingest 작업 │──▶│ PostgreSQL+PostGIS │◀──│ api 서버 (Go)     │──────────────────────▶│ iOS / Android 앱      │
+ OpenAI GPT ──────┘   │ (하루 1회)  │   └──────────────────┘   │ 지역 파일 메모리 캐시 │◀── 상세·저장(좌표 없음) │ 기기 안: 거리·근처·지도 │
+ 네이버·카카오 ───────▶└────────────┘                          └──────────────────┘                        │ 정렬·검색·위치명(OS)   │
+ 지오코딩(수집용)                                                                                           └──────────────────────┘
+                                                        ✕ 사용자 좌표는 서버로 가지 않는다 (v1.6)
 ```
 
+- **위치 비전송 (v1.6, SERVICE-PLAN §12 Q8, [ADR 0004](../adr/0004-no-location-send.md))**: 앱은 사용자 좌표를 서버로 보내지 않는다.
+  api는 지역 단위 전체 데이터(`GET /v1/regions/{region}/spots`, 현재 `seoul`)를 내려주고, 앱이 받아 두고
+  **거리 계산·반경·지도 영역·필터·정렬·키워드 검색**을 기기에서 한다. 위치 이름은 기기 지오코더(iOS `CLGeocoder`, Android `Geocoder`).
+  서버의 PostGIS 공간 조회는 남지만(수집·지역 경계), 사용자 좌표로 조회하는 일은 없어진다.
 - **api**: REST. 볼거리 조회는 인증 없이, **저장 목록(`/v1/me/saved`)만 로그인 사용자 토큰 필요**.
 - **ingest**: 소스별 수집기 → 정규화 → 지오코딩 → GPT 보강(요약·분류) → 중복 제거 → 저장. 주기 실행 배치.
 - **계약**: `api/openapi.yaml`이 단일 기준. 앱 레포는 `make sync-api`로 복사해서 사용.
@@ -39,6 +45,7 @@
 | Go 표준 라이브러리 위주 | 엔드포인트가 적고 단순. 의존성 최소화가 에이전트 개발에 유리 |
 | PostGIS `geography` + GiST 인덱스 | 반경 검색·거리순 정렬을 DB에서 정확하게 처리 |
 | GORM | 사용자 결정(2026-11-20). PostGIS 공간 쿼리는 GORM raw 표현식으로 작성, 스키마는 goose SQL 마이그레이션이 기준 |
+| 위치 비전송 + 지역 데이터 파일 | 사업자등록을 하지 않기로 해 위치기반서비스사업 신고가 사실상 불가(docs/legal/LBS-REPORT.md). 좌표를 서버가 받지 않으면 신고 대상에서 벗어날 가능성이 커진다(미확인). 덤으로 응답 즉시·오프라인·서버 부하 감소. 서울 데이터는 수천 건 수준이라 기기 계산이 가능 |
 | 네이버 지도 (양 앱) | 국내 지도 품질, 길찾기를 네이버지도 앱으로 연결(기획 P0) |
 | 지오코딩: 네이버 클라우드 Geocoding + 카카오 키워드 검색 | 좌표 없는 소스 항목 보완. 네이버(주소) 실패 시 카카오 키워드(장소명, 서울 범위·이름 유사도 확인) |
 | LLM: OpenAI GPT | 요약·카테고리 분류·무료 여부 추출. 결과는 DB에 캐시, 원문 해시가 같으면 재호출 안 함 |
@@ -59,17 +66,28 @@
 
 ## 4. API (M1)
 
-| 메서드 | 경로 | 설명 |
-|---|---|---|
-| GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `q`(키워드: 제목·장소명·주소 부분 일치, 1~50자), `cursor`, `limit` → 거리순 |
-| GET | `/v1/spots/{id}` | 상세 |
-| GET | `/v1/spots/map` | 지도 영역(bbox: `sw_lat`, `sw_lng`, `ne_lat`, `ne_lng`) + `category`, `when`, `free`, 최대 `limit`(기본 200, 최대 500)개, 영역 중심에서 가까운 순. 넘치면 `truncated: true`. 클러스터는 앱에서 처리 |
-| GET | `/healthz` | 헬스체크 |
+| 메서드 | 경로 | 설명 | 상태 |
+|---|---|---|---|
+| GET | `/v1/regions/{region}/spots` | **지역 데이터 파일** (v1.6). `region`=`seoul`(그 외 404). 그 지역의 볼거리 중 **진행 중·앞으로 90일 안에 시작** + **종료 후 90일 안** 항목 전부(끝난 항목도 넣어 저장·상세가 오프라인에서도 보이게). 항목은 `Spot` 필드에서 `distance_m`·`saved_at` 제외, `is_ended`는 `generated_at` 기준. 본문 `{region, generated_at, count, items}`. `Accept-Encoding: gzip`이면 gzip, 강한 `ETag`(내용 해시) + `If-None-Match` → 304, `Cache-Control: public, max-age=3600`. 서버는 요청마다 조회하지 않고 메모리 캐시를 **최대 10분마다** 다시 만든다(내용이 같으면 ETag·`generated_at` 유지) | 신규 |
+| GET | `/v1/spots/{id}` | 상세 (좌표 없음) | 유지 |
+| GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `q`(키워드: 제목·장소명·주소 부분 일치, 1~50자), `cursor`, `limit` → 거리순 | **폐기 예고** — 앱 전환 후 제거 (#74) |
+| GET | `/v1/spots/map` | 지도 영역(bbox: `sw_lat`, `sw_lng`, `ne_lat`, `ne_lng`) + `category`, `when`, `free`, 최대 `limit`(기본 200, 최대 500)개, 영역 중심에서 가까운 순. 넘치면 `truncated: true`. 클러스터는 앱에서 처리 | **폐기 예고** — 앱 전환 후 제거 (#74) |
+| GET | `/v1/geo/reverse` | 좌표 → 행정구역 이름(서버가 네이버 호출) | **폐기 예고** — 기기 지오코더로 대체, 앱 전환 후 제거 (#74) |
+| GET | `/healthz` | 헬스체크 | 유지 |
 
 - `Spot.fetched_at`(원본에서 가져온 시각, 필수) — 상세 화면의 "갱신 시각".
+- 폐기 예고 엔드포인트는 openapi에 `deprecated: true`로 표시하고, iOS·Android가 지역 파일로 전환한 뒤 별도 PR로 지운다(그때 `logredact.go`의 좌표 파라미터 처리도 정리).
+- 앱의 지역 파일 동기화: 앱 시작·포그라운드 복귀 때 `If-None-Match`로 확인(하루 1회 갱신이라 대부분 304). 받은 파일은 기기에 저장해 오프라인에서도 쓴다.
+- **지역 파일 크기 실측** (2026-11-25, 로컬 API + 수집 스냅샷 `data/snapshot.json` 2,696건, 이슈 #74 구현 PR):
+
+  | 지역 | 항목 수 | 그중 끝난 항목 | 원본 JSON | gzip(BestCompression) |
+  |---|---|---|---|---|
+  | seoul | 2,676 | 1,181 | 1,778,652 B (약 1.7 MB) | **294,413 B (약 288 KB)** |
+
+  첫 실행 때 한 번 약 290 KB를 받고, 이후는 대부분 304(본문 없음). 서버 메모리는 지역당 약 2 MB, 다시 만들기 약 30 ms(메모리 저장소 기준).
 
 - 인증 없음. 대신 앱별 API 키 헤더 + IP 기준 속도 제한.
-- 응답 캐시: `Cache-Control: max-age=60`.
+- 응답 캐시: 지역 파일 `Cache-Control: public, max-age=3600`, 나머지 조회 `max-age=60`.
 
 ## 4.1 인증·저장 (v1.3)
 
@@ -146,4 +164,5 @@
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
 | 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
 | 2026-11-24 | v1.4 | §5 인프라: GCP → Railway(API·수집 cron, 싱가포르) + Supabase 무료(조직·프로젝트 herezi, ap-southeast-1, session pooler), RLS·권한 회수(00005), 월 비용 추정, 7일 비활성 일시정지 메모 ([ADR 0003](../adr/0003-railway-supabase.md)) |
+| 2026-11-25 | v1.6 | **위치 비전송**(SERVICE-PLAN v1.4 §12 Q8, 이슈 #74, [ADR 0004](../adr/0004-no-location-send.md)): §1 구조도(지역 파일 → 기기 계산), §2 결정 추가, §4 `GET /v1/regions/{region}/spots` 신규, `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse` 폐기 예고. §4.1은 변경 없음 |
 | 2026-11-24 | v1.5 | §4.1 구현 세부(이슈 #56): `POST /v1/me/saved:import`, 사용자당 500개, 서버 설정(`SUPABASE_URL`·선택 `SUPABASE_JWT_SECRET`·`SUPABASE_SERVICE_ROLE_KEY`), 저장 행 CASCADE 정리, 탈퇴 순서 |
