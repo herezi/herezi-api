@@ -59,6 +59,7 @@ func run(log *slog.Logger) error {
 
 	var spots store.SpotReader
 	var saved store.SavedStore
+	var notices store.NoticeReader
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		if os.Getenv("MIGRATE_ON_START") == "1" {
 			n, err := postgres.Migrate(ctx, url)
@@ -72,7 +73,7 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		defer func() { _ = pg.Close() }()
-		spots, saved = pg, pg
+		spots, saved, notices = pg, pg, pg
 		log.Info("store: postgres")
 	} else if path := os.Getenv("SNAPSHOT_PATH"); path != "" {
 		snap, generatedAt, err := snapshot.Read(path)
@@ -80,11 +81,13 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		mem := memory.New(snap...)
-		spots, saved = mem, mem
+		_, _ = mem.InsertNotice(ctx, memory.SeedNotice())
+		spots, saved, notices = mem, mem, mem
 		log.Info("store: memory from snapshot", "spots", len(snap), "generated_at", generatedAt)
 	} else {
 		mem := memory.New(memory.SeedSeoul(time.Now())...)
-		spots, saved = mem, mem
+		_, _ = mem.InsertNotice(ctx, memory.SeedNotice())
+		spots, saved, notices = mem, mem, mem
 		log.Warn("store: memory with seed data (DATABASE_URL and SNAPSHOT_PATH not set)")
 	}
 
@@ -96,7 +99,7 @@ func run(log *slog.Logger) error {
 		log.Warn("geocoder: disabled (NCP_MAPS_CLIENT_ID/SECRET not set), /v1/geo/reverse returns 501")
 	}
 
-	opts = append(opts, httpapi.WithSaved(saved))
+	opts = append(opts, httpapi.WithSaved(saved), httpapi.WithNotices(notices))
 	if u := os.Getenv("SUPABASE_URL"); u != "" {
 		secret := os.Getenv("SUPABASE_JWT_SECRET")
 		opts = append(opts, httpapi.WithAuth(auth.NewSupabase(auth.SupabaseConfig{URL: u, JWTSecret: secret})))

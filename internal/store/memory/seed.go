@@ -35,3 +35,13 @@ func SeedSeoul(now time.Time) []domain.Spot {
 			37.5700, 126.9830, "인사동", now.Add(-20*day), ptr(now.Add(-1*day)), &no),
 	}
 }
+
+// SeedNotice는 DB 없이 띄울 때 보여 줄 예시 공지(migrations/00008의 첫 공지와 같은 제목).
+func SeedNotice() domain.Notice {
+	return domain.Notice{
+		Title: "히어지 테스트를 시작했어요",
+		Body: "안녕하세요, 히어지예요.\n\n" +
+			"iOS·Android 앱의 **내부 테스트**를 시작했어요. (DB 없이 띄운 서버의 예시 공지예요.)",
+		PublishedAt: time.Date(2026, 11, 25, 0, 0, 0, 0, domain.Seoul),
+	}
+}

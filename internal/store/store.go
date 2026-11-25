@@ -136,3 +136,22 @@ type SavedStore interface {
 	// DeleteUserSaved는 사용자의 저장 행을 모두 지운다(회원 탈퇴).
 	DeleteUserSaved(ctx context.Context, userID string) (int, error)
 }
+
+// MaxNotices는 공지 목록(GET /v1/notices)이 돌려주는 최대 개수.
+const MaxNotices = 50
+
+// NoticeReader는 공지사항 읽기 저장소(이슈 #80). 게시된 공지(domain.Notice.Published)만 돌려준다.
+type NoticeReader interface {
+	// Notices는 now 기준 게시된 공지를 게시 시각 최신순(같으면 ID 큰 것 먼저)으로 최대 limit개 돌려준다.
+	// 목록용이라 Body는 비어 있다.
+	Notices(ctx context.Context, now time.Time, limit int) ([]domain.Notice, error)
+	// NoticeByID는 게시된 공지 하나를 본문과 함께 돌려준다. 없거나 숨김·게시 전이면 ErrNotFound.
+	NoticeByID(ctx context.Context, id int64, now time.Time) (domain.Notice, error)
+}
+
+// NoticeStore는 NoticeReader + 쓰기(테스트·예시 데이터용. 운영 작성은 Supabase Table Editor).
+type NoticeStore interface {
+	NoticeReader
+	// InsertNotice는 공지를 추가하고 새 ID를 돌려준다(n.ID는 무시).
+	InsertNotice(ctx context.Context, n domain.Notice) (int64, error)
+}

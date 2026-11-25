@@ -18,12 +18,16 @@ type Store struct {
 	mu    sync.RWMutex
 	spots map[string]domain.Spot
 	saved map[string]map[string]time.Time // user ID → spot ID → saved_at
-	now   func() time.Time
+	// 공지사항(notice.go). ID는 1부터 붙인다.
+	notices      []domain.Notice
+	lastNoticeID int64
+	now          func() time.Time
 }
 
 var (
-	_ store.SpotStore  = (*Store)(nil)
-	_ store.SavedStore = (*Store)(nil)
+	_ store.SpotStore   = (*Store)(nil)
+	_ store.SavedStore  = (*Store)(nil)
+	_ store.NoticeStore = (*Store)(nil)
 )
 
 // New returns a store pre-filled with spots.
