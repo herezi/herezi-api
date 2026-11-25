@@ -31,7 +31,7 @@ internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 
 internal/store/postgres/    PostGIS 저장소 (GORM, 공간 조건은 raw 표현식)
 internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
-internal/auth/              Supabase Auth JWT 검증(JWKS 캐시, ES256/RS256, 선택적 HS256). 표준 라이브러리만
+internal/auth/              Supabase Auth JWT 검증(JWKS 캐시, ES256/RS256, 선택적 HS256), Admin API 삭제, Apple 토큰 철회. 표준 라이브러리만
 internal/geo/               역지오코딩·지오코딩 인터페이스, 네이버 클라이언트, 메모리 캐시
 internal/ingest/            수집 파이프라인(필터·지오코딩·중복 제거·GPT 보강), sources/(소스별 수집기), openai/(GPT 배치)
 internal/snapshot/          수집 결과 JSON 스냅샷 읽기·쓰기

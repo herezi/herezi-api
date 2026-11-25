@@ -10,6 +10,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -23,7 +24,15 @@ var ErrUnavailable = errors.New("auth: verification keys unavailable")
 type User struct {
 	// ID는 Supabase 사용자 ID(`sub`, UUID 소문자).
 	ID string
+	// Providers는 연결된 로그인 제공자(`app_metadata.providers`, 예: "kakao", "apple"). 토큰에 없으면 비어 있다.
+	Providers []string
 }
+
+// ProviderApple은 Supabase Auth의 Apple 제공자 이름.
+const ProviderApple = "apple"
+
+// HasProvider는 사용자에게 제공자 p가 연결돼 있는지 본다.
+func (u User) HasProvider(p string) bool { return slices.Contains(u.Providers, p) }
 
 // Verifier는 액세스 토큰을 검증한다. 실패하면 ErrInvalidToken 또는 ErrUnavailable을 감싼 에러를 돌려준다.
 type Verifier interface {

@@ -98,6 +98,10 @@ type jwtClaims struct {
 	Exp         *json.Number    `json:"exp"`
 	Nbf         *json.Number    `json:"nbf"`
 	IsAnonymous bool            `json:"is_anonymous"`
+	AppMetadata struct {
+		Provider  string   `json:"provider"`
+		Providers []string `json:"providers"`
+	} `json:"app_metadata"`
 }
 
 func invalid(reason string) error { return fmt.Errorf("%w: %s", ErrInvalidToken, reason) }
@@ -133,7 +137,18 @@ func (s *Supabase) Verify(ctx context.Context, token string) (User, error) {
 	if err := s.checkClaims(c); err != nil {
 		return User{}, err
 	}
-	return User{ID: strings.ToLower(c.Sub)}, nil
+	return User{ID: strings.ToLower(c.Sub), Providers: providers(c.AppMetadata.Provider, c.AppMetadata.Providers)}, nil
+}
+
+// providers는 app_metadata.providers(연결된 모든 제공자)와 provider(처음 가입한 제공자)를 합친다.
+func providers(first string, all []string) []string {
+	var out []string
+	for _, p := range append([]string{first}, all...) {
+		if p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func decodeSegment(seg string, v any) error {

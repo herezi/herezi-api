@@ -1,6 +1,8 @@
 package httpapi_test
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -133,5 +135,104 @@ func TestDeleteMeNotConfigured(t *testing.T) {
 	}
 	if res := call(t, srv, http.MethodDelete, "/v1/me", "", nil, nil); res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("no token: %d", res.StatusCode)
+	}
+}
+
+// providerVerifier: testVerifier에 제공자를 붙인다(Apple 사용자 = UserA).
+type providerVerifier map[string]auth.User
+
+func (p providerVerifier) Verify(_ context.Context, tok string) (auth.User, error) {
+	if u, ok := p[tok]; ok {
+		return u, nil
+	}
+	return auth.User{}, auth.ErrInvalidToken
+}
+
+// fakeRevoker는 auth.AppleRevoker. "bad"는 ErrAppleInvalidCode, err가 있으면 그 에러.
+type fakeRevoker struct {
+	mu    sync.Mutex
+	err   error
+	codes []string
+}
+
+func (f *fakeRevoker) RevokeAuthorizationCode(_ context.Context, code string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.codes = append(f.codes, code)
+	if code == "bad" {
+		return auth.ErrAppleInvalidCode
+	}
+	return f.err
+}
+
+func (f *fakeRevoker) setErr(err error) { f.mu.Lock(); defer f.mu.Unlock(); f.err = err }
+
+func TestDeleteMeApple(t *testing.T) {
+	admin := newFakeAdmin(t)
+	st := memory.New(storetest.Fixtures()...)
+	rev := &fakeRevoker{}
+	v := providerVerifier{
+		tokA: {ID: storetest.UserA, Providers: []string{"apple"}},
+		tokB: {ID: storetest.UserB, Providers: []string{"kakao"}},
+	}
+	var buf syncBuf
+	newSrv := func(opts ...httpapi.Option) *httptest.Server {
+		base := []httpapi.Option{httpapi.WithAuth(v), httpapi.WithSaved(st),
+			httpapi.WithUserDeleter(auth.NewSupabaseAdmin(admin.srv.URL, adminKey, nil))}
+		s := httptest.NewServer(httpapi.New(st, slog.New(slog.NewTextHandler(&buf, nil)), append(base, opts...)...).Handler())
+		t.Cleanup(s.Close)
+		return s
+	}
+	srv := newSrv(httpapi.WithAppleRevoker(rev))
+	if res := call(t, srv, http.MethodPut, "/v1/me/saved/test:mid-popup", tokA, nil, nil); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("put: %d", res.StatusCode)
+	}
+	type body = map[string]any
+	expect := func(name string, s *httptest.Server, tok string, b any, status int, code string) {
+		t.Helper()
+		var e apiError
+		res := call(t, s, http.MethodDelete, "/v1/me", tok, b, &e)
+		if res.StatusCode != status || e.Code != code {
+			t.Fatalf("%s: got %d %q, want %d %q", name, res.StatusCode, e.Code, status, code)
+		}
+	}
+
+	// 서버에 Apple 키가 없으면 Apple 사용자는 503, 지우지 않는다.
+	expect("not configured", newSrv(), tokA, body{"apple_authorization_code": "c"}, http.StatusServiceUnavailable, "auth_not_configured")
+	// 코드 없음·만료 코드 → 400 apple_reauth_required.
+	expect("no body", srv, tokA, nil, http.StatusBadRequest, "apple_reauth_required")
+	expect("empty code", srv, tokA, body{"apple_authorization_code": ""}, http.StatusBadRequest, "apple_reauth_required")
+	expect("invalid code", srv, tokA, body{"apple_authorization_code": "bad"}, http.StatusBadRequest, "apple_reauth_required")
+	expect("bad json", srv, tokA, "not an object", http.StatusBadRequest, "invalid_parameter")
+	expect("code too long", srv, tokA, body{"apple_authorization_code": strings.Repeat("x", 3000)}, http.StatusBadRequest, "invalid_parameter")
+	// Apple 서버 오류 → 502.
+	rev.setErr(errors.New("auth: apple revoke: status 503"))
+	expect("apple down", srv, tokA, body{"apple_authorization_code": "code-1"}, http.StatusBadGateway, "upstream_error")
+	if len(admin.deletes) != 0 || !admin.users[storetest.UserA] {
+		t.Fatalf("nothing must be deleted before Apple revoke succeeds: %v", admin.deletes)
+	}
+	var p savedPage
+	if call(t, srv, http.MethodGet, "/v1/me/saved", tokA, nil, &p); len(p.Items) != 1 {
+		t.Fatalf("saved rows must be kept: %d", len(p.Items))
+	}
+
+	// 성공: 철회 → Supabase 삭제 → 204.
+	rev.setErr(nil)
+	if res := call(t, srv, http.MethodDelete, "/v1/me", tokA, body{"apple_authorization_code": "code-2"}, nil); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("apple delete: %d", res.StatusCode)
+	}
+	if !slices.Equal(rev.codes, []string{"bad", "code-1", "code-2"}) || !slices.Equal(admin.deletes, []string{storetest.UserA}) {
+		t.Fatalf("revoke codes %v, admin deletes %v", rev.codes, admin.deletes)
+	}
+
+	// 카카오 사용자: 코드 없이 탈퇴, 철회하지 않는다(코드를 보내도 무시).
+	if res := call(t, srv, http.MethodDelete, "/v1/me", tokB, body{"apple_authorization_code": "ignored"}, nil); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("kakao delete: %d", res.StatusCode)
+	}
+	if len(rev.codes) != 3 {
+		t.Fatalf("kakao user must not trigger revoke: %v", rev.codes)
+	}
+	if out := buf.String(); strings.Contains(out, "code-1") || strings.Contains(out, storetest.UserA) {
+		t.Fatalf("log leaks code or user id:\n%s", out)
 	}
 }
