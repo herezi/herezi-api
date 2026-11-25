@@ -71,6 +71,8 @@
 ### 3) 진행 중
 - **탈퇴하기** 버튼 글자 자리에 진행 표시(흰색 20), 뒤로·체크 비활성, 스와이프 뒤로 막음.
 - 서버 `DELETE /v1/me`(저장 삭제 + Supabase 사용자 삭제). 카카오는 앱에서 `unlink`, Apple은 서버가 토큰 철회(아래 주의).
+- **Apple 사용자**: 시스템 확인 **탈퇴** 직후 Apple 로그인 시트(시스템)가 한 번 더 뜬다(재인증). 확인하면 받은 코드로 `DELETE /v1/me`를 부른다.
+  재인증을 **취소**하면 탈퇴를 멈추고 확인 화면 그대로(체크 유지), 토스트 **Apple 확인을 취소해서 탈퇴하지 않았어요.**
 
 ### 4) 완료 화면
 탈퇴 확인 화면을 **완료 화면으로 교체**(뒤로 가기로 돌아갈 수 없음, 상단 바 없음).
@@ -83,6 +85,7 @@
 ### 5) 실패
 - 진행 표시 해제, 확인 화면 그대로(체크 유지). 토스트 **탈퇴하지 못했어요. 잠시 후 다시 시도해 주세요.**
 - 네트워크 없음이면 **인터넷 연결을 확인하고 다시 시도해 주세요.**
+- Apple 재인증이 실패하거나 서버가 Apple 확인을 거부하면(`apple_reauth_required`) 기본 실패 토스트. 다시 **탈퇴하기**를 누르면 재인증부터 다시 한다.
 - 세션 만료로 실패하면 S7 시트를 띄워 다시 로그인하게 하고, 로그인 후 이 화면으로 돌아온다(대기 동작 = 없음, 사용자가 다시 **탈퇴하기**).
 
 ## 상태
@@ -102,6 +105,6 @@
 - `회원 탈퇴`를 `text.secondary`로 두는 건 위계만 낮추는 것 — 대비 7.1:1로 충분.
 
 ## 개발자 주의
-- **Apple 탈퇴 = 토큰 철회 필수**(Apple 가이드: 계정 삭제 시 Sign in with Apple 토큰 revoke). 서버가 `appleid.apple.com/auth/revoke`를 부르려면 로그인 때 받은 authorization code로 만든 refresh token이 서버에 있어야 한다. 없다면 탈퇴 직전 iOS에서 Apple 재인증으로 새 authorization code를 받아 `DELETE /v1/me`에 함께 보낸다. (서버 이슈로 따로 정리)
+- **Apple 탈퇴 = 토큰 철회 필수**(Apple 가이드: 계정 삭제 시 Sign in with Apple 토큰 revoke). 서버는 Apple 토큰을 저장하지 않는다 — 탈퇴 직전 iOS가 Apple 재인증(`ASAuthorizationAppleIDProvider`, scope 없음)으로 새 `authorizationCode`를 받아 `DELETE /v1/me` 본문 `{"apple_authorization_code": "…"}`로 보내고, 서버가 토큰 교환 후 `appleid.apple.com/auth/revoke`를 부른다. 철회가 실패하면 서버는 아무것도 지우지 않는다(herezi-api#72, TECH-PLAN §4.1).
 - 카카오 탈퇴 = 앱에서 `UserApi.unlink` 후 서버 `DELETE /v1/me`. unlink 실패해도 서버 삭제는 진행.
 - 탈퇴 후 같은 계정으로 다시 로그인하면 새 사용자(빈 저장 목록).

@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -296,5 +297,33 @@ func TestIsUUID(t *testing.T) {
 		if got := auth.IsUUID(in); got != want {
 			t.Errorf("IsUUID(%q) = %v", in, got)
 		}
+	}
+}
+
+// TestVerifyProviders: app_metadata.provider·providers → User.Providers(중복 제거). 없으면 비어 있다.
+func TestVerifyProviders(t *testing.T) {
+	f := newFakeSupabase(t)
+	now := testNow
+	v := newVerifier(f, "", &now)
+	for name, tc := range map[string]struct {
+		meta  any
+		want  []string
+		apple bool
+	}{
+		"apple only":    {map[string]any{"provider": "apple", "providers": []string{"apple"}}, []string{"apple"}, true},
+		"kakao + apple": {map[string]any{"provider": "kakao", "providers": []string{"kakao", "apple"}}, []string{"kakao", "apple"}, true},
+		"kakao":         {map[string]any{"provider": "kakao"}, []string{"kakao"}, false},
+		"none":          {nil, nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := validClaims(f)
+			if tc.meta != nil {
+				c["app_metadata"] = tc.meta
+			}
+			u, err := v.Verify(context.Background(), f.sign(t, "ES256", "ec-1", c, ""))
+			if err != nil || !slices.Equal(u.Providers, tc.want) || u.HasProvider(auth.ProviderApple) != tc.apple {
+				t.Fatalf("got %+v, %v", u, err)
+			}
+		})
 	}
 }

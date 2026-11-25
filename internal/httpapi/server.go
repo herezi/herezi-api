@@ -29,6 +29,7 @@ type Server struct {
 	auth     auth.Verifier       // nil이면 /v1/me/*는 503 auth_not_configured
 	saved    store.SavedStore    // nil이면 /v1/me/saved*는 503 auth_not_configured
 	users    auth.UserDeleter    // nil이면 DELETE /v1/me는 503 auth_not_configured
+	apple    auth.AppleRevoker   // nil이면 Apple 사용자의 DELETE /v1/me는 503 auth_not_configured
 	notices  store.NoticeReader  // nil이면 /v1/notices*는 503 not_configured
 	regions  *regionCache        // 지역 데이터 파일 메모리 캐시(regions.go)
 	log      *slog.Logger
@@ -104,6 +105,7 @@ const (
 	codeAuthNotConfigured = "auth_not_configured"
 	codeAuthUnavailable   = "auth_unavailable"
 	codeSavedLimit        = "saved_limit_exceeded"
+	codeAppleReauth       = "apple_reauth_required"
 )
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {

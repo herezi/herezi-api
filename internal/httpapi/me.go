@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/herezi/herezi-api/internal/auth"
@@ -182,9 +184,28 @@ func (s *Server) importSaved(w http.ResponseWriter, r *http.Request, user auth.U
 // WithUserDeleter sets the auth-server user deleter for DELETE /v1/me. 없으면 503 auth_not_configured.
 func WithUserDeleter(d auth.UserDeleter) Option { return func(s *Server) { s.users = d } }
 
+// WithAppleRevoker sets the Sign in with Apple token revoker for DELETE /v1/me (이슈 #72).
+// 없으면 Apple 사용자의 탈퇴는 503 auth_not_configured(철회 없이 지우지 않는다).
+func WithAppleRevoker(a auth.AppleRevoker) Option { return func(s *Server) { s.apple = a } }
+
+// maxDeleteMeBody는 DELETE /v1/me 본문 상한({"apple_authorization_code": "..."}).
+const (
+	maxDeleteMeBody      = 8 << 10
+	maxAppleCodeLen      = 2048
+	appleReauthMessage   = "sign in with Apple again and send apple_authorization_code"
+	appleRevokeFailedMsg = "failed to revoke Apple token"
+)
+
+type deleteMeRequest struct {
+	AppleAuthorizationCode string `json:"apple_authorization_code"`
+}
+
 // deleteMe는 회원 탈퇴다(S6, App Store 심사 지침 5.1.1(v)).
 //
-// 순서: ① Supabase Admin API로 사용자 삭제 → ② 성공하면 저장 행 삭제 → 204.
+// 순서: ⓪ Apple 사용자면 Apple 토큰 철회 → ① Supabase Admin API로 사용자 삭제 → ② 성공하면 저장 행 삭제 → 204.
+//   - ⓪ Apple 제공자가 연결된 사용자는 본문 `apple_authorization_code`(탈퇴 직전 재인증으로 받은 코드)가 필요하다.
+//     없거나 Apple이 거부하면(만료·재사용) 400 apple_reauth_required, Apple 서버 오류면 502 upstream_error.
+//     어느 쪽이든 아무것도 지우지 않는다 — 앱이 다시 인증해 재시도한다. 다른 제공자 사용자는 본문을 무시한다.
 //   - ①이 실패하면 502 upstream_error, 저장 행은 그대로 둔다(계정이 남았는데 저장만 사라지지 않게). 앱은 재시도한다.
 //   - ①은 성공했는데 ②가 실패하면 500. 액세스 토큰은 만료 전까지 유효하므로 앱이 재시도하면
 //     ①은 이미 없는 사용자(404)라 성공으로 넘어가고 ②를 다시 한다(멱등).
@@ -192,6 +213,39 @@ func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request, user auth.User
 	if s.users == nil {
 		writeError(w, http.StatusServiceUnavailable, codeAuthNotConfigured, "account deletion is not configured")
 		return
+	}
+	var body deleteMeRequest
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxDeleteMeBody+1))
+	if err != nil || len(raw) > maxDeleteMeBody {
+		writeError(w, http.StatusBadRequest, codeInvalidParameter, "request body is too large or unreadable")
+		return
+	}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &body); err != nil || len(body.AppleAuthorizationCode) > maxAppleCodeLen {
+			writeError(w, http.StatusBadRequest, codeInvalidParameter, "invalid request body")
+			return
+		}
+	}
+	if user.HasProvider(auth.ProviderApple) {
+		if s.apple == nil {
+			s.log.Error("apple revoke not configured") // APPLE_TEAM_ID·APPLE_KEY_ID·APPLE_PRIVATE_KEY
+			writeError(w, http.StatusServiceUnavailable, codeAuthNotConfigured, "Apple account deletion is not configured")
+			return
+		}
+		if body.AppleAuthorizationCode == "" {
+			writeError(w, http.StatusBadRequest, codeAppleReauth, appleReauthMessage)
+			return
+		}
+		err := s.apple.RevokeAuthorizationCode(r.Context(), body.AppleAuthorizationCode)
+		switch {
+		case errors.Is(err, auth.ErrAppleInvalidCode):
+			writeError(w, http.StatusBadRequest, codeAppleReauth, appleReauthMessage)
+			return
+		case err != nil:
+			s.log.Error("apple revoke", "err", logErr(err)) // 코드·토큰·사용자 ID는 남기지 않는다
+			writeError(w, http.StatusBadGateway, codeUpstream, appleRevokeFailedMsg)
+			return
+		}
 	}
 	if err := s.users.DeleteUser(r.Context(), user.ID); err != nil {
 		s.log.Error("delete auth user", "err", logErr(err)) // 사용자 ID·키는 남기지 않는다

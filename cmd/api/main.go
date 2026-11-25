@@ -13,6 +13,9 @@
 //   - SUPABASE_JWT_SECRET: (선택) 레거시 HS256 JWT 비밀값. 있으면 HS256 토큰도 받는다.
 //   - SUPABASE_SERVICE_ROLE_KEY: 서비스 역할 키(회원 탈퇴 때 Supabase Admin API로 사용자 삭제).
 //     없으면 DELETE /v1/me는 503 auth_not_configured.
+//   - APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY(.p8 PEM 내용): Sign in with Apple 키. 탈퇴 때 Apple 토큰을
+//     철회한다(이슈 #72). 없거나 키가 잘못되면 Apple 사용자의 DELETE /v1/me는 503(철회 없이 지우지 않는다).
+//   - APPLE_CLIENT_ID: 기본 com.herezi.app(앱 번들 ID — 앱이 받은 authorization code의 client_id).
 //
 // 비밀값은 로그에 남기지 않는다(설정 여부만).
 //
@@ -107,6 +110,9 @@ func run(log *slog.Logger) error {
 		if key := os.Getenv("SUPABASE_SERVICE_ROLE_KEY"); key != "" {
 			opts = append(opts, httpapi.WithUserDeleter(auth.NewSupabaseAdmin(u, key, nil)))
 			log.Info("account deletion: supabase admin")
+			if apple := appleRevoker(log); apple != nil {
+				opts = append(opts, httpapi.WithAppleRevoker(apple))
+			}
 		} else {
 			log.Warn("account deletion: disabled (SUPABASE_SERVICE_ROLE_KEY not set), DELETE /v1/me returns 503")
 		}
@@ -144,4 +150,20 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// appleRevoker는 APPLE_* 변수로 Apple 토큰 철회 클라이언트를 만든다. 없거나 잘못되면 nil(값은 로그에 남기지 않는다).
+func appleRevoker(log *slog.Logger) auth.AppleRevoker {
+	team, kid, key := os.Getenv("APPLE_TEAM_ID"), os.Getenv("APPLE_KEY_ID"), os.Getenv("APPLE_PRIVATE_KEY")
+	if team == "" || kid == "" || key == "" {
+		log.Warn("apple revoke: disabled (APPLE_TEAM_ID/APPLE_KEY_ID/APPLE_PRIVATE_KEY not set), Apple users' DELETE /v1/me returns 503")
+		return nil
+	}
+	a, err := auth.NewApple(auth.AppleConfig{TeamID: team, KeyID: kid, PrivateKey: key, ClientID: os.Getenv("APPLE_CLIENT_ID")})
+	if err != nil {
+		log.Error("apple revoke: disabled (invalid key)", "err", err.Error())
+		return nil
+	}
+	log.Info("apple revoke: enabled")
+	return a
 }
