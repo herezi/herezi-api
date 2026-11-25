@@ -1,6 +1,6 @@
 # S6 설정
 
-> 진입: 저장 탭(S4) 상단 바 오른쪽 톱니 아이콘 → push (DESIGN §6.12). 상단 바 왼쪽에 뒤로 버튼.
+> 진입: 하단 **MY 탭**(4번째)의 루트 화면 (DESIGN §6.12, 2026-11-25 변경). 뒤로 버튼 없음. 상단 바 큰 제목 **MY** (`type.title1`, S4와 같은 스타일).
 > 토큰·컴포넌트: [DESIGN.md](../DESIGN.md) §6.19 `AccountRow` · §6.20 `DestructiveConfirm` · 기획: SERVICE-PLAN v1.3 §8 P1 계정, §9 S6, §13 정보 오류 제보 · 기술: TECH-PLAN §4.1 · 로그인: [S7-login.md](S7-login.md)
 > 목업: [../mockups/settings-account.png](../mockups/settings-account.png) (왼쪽 로그인 상태 설정, 오른쪽 탈퇴 확인)
 > 코드: iOS `Features/Settings/SettingsView.swift`(`SettingsRow`) · Android `feature/settings/SettingsScreen.kt`(`SettingRow`)
