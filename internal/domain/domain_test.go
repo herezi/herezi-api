@@ -102,3 +102,21 @@ func TestMatchesKeyword(t *testing.T) {
 		}
 	}
 }
+
+func TestRegions(t *testing.T) {
+	r, ok := RegionByID("seoul")
+	if !ok || !r.BBox.Contains(37.5663, 126.9779) || r.BBox.Contains(35.1796, 129.0756) {
+		t.Fatalf("seoul = %+v, %v", r, ok)
+	}
+	if err := r.BBox.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := RegionByID("busan"); ok {
+		t.Fatal("busan must be unknown")
+	}
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, Seoul)
+	from, to := RegionWindow(now)
+	if !from.Equal(now.AddDate(0, 0, -RetainEndedDays)) || !to.Equal(now.AddDate(0, 0, RegionAheadDays)) {
+		t.Fatalf("window %v ~ %v", from, to)
+	}
+}

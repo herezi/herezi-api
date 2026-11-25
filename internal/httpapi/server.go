@@ -29,6 +29,7 @@ type Server struct {
 	auth     auth.Verifier       // nil이면 /v1/me/*는 503 auth_not_configured
 	saved    store.SavedStore    // nil이면 /v1/me/saved*는 503 auth_not_configured
 	users    auth.UserDeleter    // nil이면 DELETE /v1/me는 503 auth_not_configured
+	regions  *regionCache        // 지역 데이터 파일 메모리 캐시(regions.go)
 	log      *slog.Logger
 	now      func() time.Time
 }
@@ -41,7 +42,7 @@ func WithClock(now func() time.Time) Option { return func(s *Server) { s.now = n
 
 // New creates a Server.
 func New(spots store.SpotReader, log *slog.Logger, opts ...Option) *Server {
-	s := &Server{spots: spots, log: log, now: time.Now}
+	s := &Server{spots: spots, regions: newRegionCache(), log: log, now: time.Now}
 	for _, o := range opts {
 		o(s)
 	}
@@ -52,6 +53,9 @@ func New(spots store.SpotReader, log *slog.Logger, opts ...Option) *Server {
 func (s *Server) Routes() []Route {
 	return []Route{
 		{http.MethodGet, "/healthz", s.healthz},
+		// 지역 데이터 파일(좌표를 받지 않음, 이슈 #74). 앱은 이것으로 근처·지도를 기기에서 계산한다.
+		{http.MethodGet, "/v1/regions/{region}/spots", s.regionSpots},
+		// 폐기 예고(openapi deprecated): 좌표를 받는 조회. 앱 전환 후 제거(#74).
 		{http.MethodGet, "/v1/spots", s.listSpots},
 		{http.MethodGet, "/v1/spots/map", s.listSpotsInBBox}, // 리터럴 경로라 {id}보다 우선
 		{http.MethodGet, "/v1/spots/{id}", s.getSpot},

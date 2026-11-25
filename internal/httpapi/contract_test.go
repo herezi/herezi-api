@@ -119,6 +119,9 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 		// /v1/me/saved:import
 		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
 		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
+		// /v1/regions/{region}/spots
+		"RegionSpots": reflect.TypeFor[regionSpotsJSON](),
+		"RegionSpot":  reflect.TypeFor[regionSpotJSON](),
 	} {
 		var got, want []string
 		for i := range typ.NumField() {
@@ -148,6 +151,9 @@ func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
 		// /v1/me/saved:import
 		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
 		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
+		// /v1/regions/{region}/spots
+		"RegionSpots": reflect.TypeFor[regionSpotsJSON](),
+		"RegionSpot":  reflect.TypeFor[regionSpotJSON](),
 	} {
 		var got []string
 		for i := range typ.NumField() {
@@ -280,5 +286,105 @@ func TestMeContract(t *testing.T) {
 	if ids.MinItems == nil || *ids.MinItems != 1 || ids.MaxItems == nil || *ids.MaxItems != maxImportIDs ||
 		ids.Items.MaxLength == nil || *ids.Items.MaxLength != maxSpotIDLen {
 		t.Fatalf("SavedImportRequest.spot_ids = %+v, code max %d / %d", ids, maxImportIDs, maxSpotIDLen)
+	}
+}
+
+// TestRegionContract: region enum이 domain.Regions()와 같고, RegionSpot은 Spot에서 distance_m·saved_at만 뺀 것이어야 한다.
+func TestRegionContract(t *testing.T) {
+	b, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name   string `yaml:"name"`
+				In     string `yaml:"in"`
+				Schema struct {
+					Enum []string `yaml:"enum"`
+				} `yaml:"schema"`
+			} `yaml:"parameters"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var enum []string
+	for _, p := range doc.Paths["/v1/regions/{region}/spots"]["get"].Parameters {
+		if p.Name == "region" && p.In == "path" {
+			enum = p.Schema.Enum
+		}
+	}
+	var ids []string
+	for _, r := range domain.Regions() {
+		ids = append(ids, r.ID)
+	}
+	if !slices.Equal(enum, ids) {
+		t.Fatalf("openapi region enum %v, domain.Regions() %v", enum, ids)
+	}
+
+	schemas := loadOpenAPI(t).Components.Schemas
+	var want []string
+	for p := range schemas["Spot"].Properties {
+		if p != "distance_m" && p != "saved_at" {
+			want = append(want, p)
+		}
+	}
+	var got []string
+	for p := range schemas["RegionSpot"].Properties {
+		got = append(got, p)
+	}
+	sort.Strings(want)
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("RegionSpot properties %v, want Spot minus distance_m/saved_at %v", got, want)
+	}
+	if !slices.Equal(schemas["RegionSpot"].Required, schemas["Spot"].Required) {
+		t.Fatalf("RegionSpot required %v, Spot required %v", schemas["RegionSpot"].Required, schemas["Spot"].Required)
+	}
+}
+
+// TestDeprecatedMatchesOpenAPI: 좌표를 받는 조회만 deprecated이고, 설명이 제거 예고로 시작해야 한다(#74).
+func TestDeprecatedMatchesOpenAPI(t *testing.T) {
+	b, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Deprecated  bool   `yaml:"deprecated"`
+			Description string `yaml:"description"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET /v1/geo/reverse", "GET /v1/spots", "GET /v1/spots/map"}
+	var got []string
+	for path, ops := range doc.Paths {
+		for method, op := range ops {
+			if !op.Deprecated {
+				continue
+			}
+			got = append(got, strings.ToUpper(method)+" "+path)
+			if !strings.HasPrefix(op.Description, "앱 전환 후 제거 (#74)") {
+				t.Errorf("%s %s: description must start with 앱 전환 후 제거 (#74), got %q", method, path, op.Description)
+			}
+		}
+	}
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("deprecated ops %v, want %v", got, want)
+	}
+	// 좌표를 받는 파라미터(coordParams)는 deprecated 엔드포인트에만 있어야 한다.
+	params := loadOpenAPI(t).Paths
+	for path, ops := range params {
+		for method, op := range ops {
+			for _, p := range op.Parameters {
+				if coordParams[p.Name] && !slices.Contains(want, strings.ToUpper(method)+" "+path) {
+					t.Errorf("%s %s takes coordinate %q but is not deprecated (#74: 앱은 좌표를 보내지 않는다)", method, path, p.Name)
+				}
+			}
+		}
 	}
 }

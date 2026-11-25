@@ -32,7 +32,7 @@
 | `cmd/*` | 모두 | — (조립만 하고 로직을 두지 않는다) |
 | `internal/store/storetest` | `domain`, `store` | 구현체 (구현체의 테스트가 이 패키지를 부른다) |
 
-## 핵심 흐름: `GET /v1/spots`
+## 핵심 흐름: `GET /v1/spots` (폐기 예고, #74 — 앱은 지역 데이터 파일로 전환)
 1. `httpapi`가 쿼리 파라미터를 검증·파싱 → 잘못되면 400 + `Error{code, message}`.
 2. `when`을 `domain.When.Window(now)`로 [from, to] 구간으로 바꾸고 `store.NearbyQuery`를 만든다.
 3. 저장소가 반경·카테고리·무료·기간 겹침·키워드(`q`: 제목·장소명·주소 ILIKE, pg_trgm 인덱스)·**끝난 행사 제외** 조건으로 거리순 조회.
@@ -44,7 +44,19 @@
 저장소 `SpotByID`는 시각 조건 없이 ID로만 찾고(없으면 `ErrNotFound` → 404), 핸들러가 요청 시계(`s.now()`)로
 `is_ended`(= `domain.Spot.Ended(now)`)를 계산해 붙인다. 목록·지도 응답의 `is_ended`는 항상 `false`다.
 
-## 역지오코딩: `GET /v1/geo/reverse`
+## 지역 데이터 파일: `GET /v1/regions/{region}/spots` (이슈 #74)
+앱은 사용자 좌표를 서버로 보내지 않는다. 지역 전체 데이터를 받아 거리·근처·지도·정렬·검색을 기기에서 계산한다.
+1. `domain.Region`(현재 `seoul`, 수집 범위와 같은 bbox). 모르는 지역은 404.
+2. `domain.RegionWindow(now)` = [now − 90일(`RetainEndedDays`), now + 90일(`RegionAheadDays`)]와 겹치는 항목. 저장소는 `SpotsInBBox`를 쓰되
+   `SpotFilter.Now`를 창의 시작으로 당기고 `Limit` 0(제한 없음)으로 불러 **종료 후 90일 안의 끝난 항목도 넣는다**(목록·지도와 다른 점). ID순으로 정렬.
+3. `httpapi/regions.go`의 메모리 캐시: 지역별 본문(원본 + gzip BestCompression)·강한 ETag(본문 SHA-256, gzip 표현은 `-gz` 접미사)를
+   만들어 두고 **최대 10분마다** 다시 만든다. 항목이 같으면 이전 본문·`generated_at`·ETag를 유지해 `If-None-Match` → 304가 이어진다.
+   다시 만들기가 실패하면 이전 본문을 주고 1분 뒤 재시도, 이전 본문이 없으면 500. 수집(cron)은 별도 프로세스라 반영은 최대 10분 늦다.
+4. 응답 헤더: `ETag`, `Cache-Control: public, max-age=3600`, `Vary: Accept-Encoding`, gzip이면 `Content-Encoding: gzip`.
+
+`/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 openapi `deprecated` — 앱 전환 후 제거한다.
+
+## 역지오코딩: `GET /v1/geo/reverse` (폐기 예고, #74)
 - 네이버 Reverse Geocoding은 Client Secret이 필요하므로 앱 대신 서버가 부른다.
 - `internal/geo`: `ReverseGeocoder` 인터페이스, 네이버 클라이언트(`Naver`, 타임아웃 2초), 메모리 캐시(`Cache`, 좌표 소수 3자리 반올림·TTL 1일, 실패는 캐시 안 함).
 - `cmd/api`가 `NCP_MAPS_CLIENT_ID`/`NCP_MAPS_CLIENT_SECRET`이 있을 때만 `Cache(Naver)`를 `httpapi.WithGeocoder`로 꽂는다. 없으면 501.
