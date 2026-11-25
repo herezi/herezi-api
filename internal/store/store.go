@@ -65,6 +65,8 @@ type BBoxQuery struct {
 }
 
 // SpotReader is what the HTTP API needs.
+// NearbySpots는 GET /v1/spots(근처)를 #74에서 지운 뒤 HTTP에서 쓰지 않는다(저장소 정리는 후속 작업).
+// SpotsInBBox는 지역 데이터 파일(/v1/regions/{region}/spots)이 쓴다.
 type SpotReader interface {
 	NearbySpots(ctx context.Context, q NearbyQuery) ([]domain.Spot, error)
 	SpotsInBBox(ctx context.Context, q BBoxQuery) ([]domain.Spot, error)

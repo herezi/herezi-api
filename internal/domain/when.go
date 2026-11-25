@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// When is the time filter of GET /v1/spots.
+// When is the time filter (KST). 서버 쿼리 파라미터였던 GET /v1/spots는 #74에서 지웠고,
+// 지금은 앱이 지역 파일을 기기에서 거를 때 쓰는 공통 값이다(api/openapi.yaml components.schemas.When).
 type When string
 
-// When values (api/openapi.yaml, /v1/spots `when`).
+// When values (api/openapi.yaml components.schemas.When).
 const (
 	WhenNow     When = "now"
 	WhenToday   When = "today"

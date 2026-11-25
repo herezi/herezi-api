@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.9 (2026-11-25) |
+| 버전 | v1.10 (2026-11-25) |
 | 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.5, [DATA-PLAN.md](DATA-PLAN.md) v1.4 |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
@@ -62,7 +62,7 @@
 - `content_hash`: GPT 재호출 방지(원문 해시, migrations/00004, 이슈 #42). `enriched_at`은 필요해지면 추가
 - `fetched_at`: 앱에 "갱신 시각"으로 표시
 
-조회 규칙: 목록(`/v1/spots`)·지도(`/v1/spots/map`)는 `ends_at < now()`인 항목을 반환하지 않는다. 상세(`/v1/spots/{id}`)는 끝난 항목도 반환하고 `is_ended: true`를 붙인다.
+조회 규칙: 근처 목록·지도는 앱이 지역 파일로 기기에서 만들고, 끝난 항목(`ends_at` < 기기 현재 시각)을 숨긴다. 상세(`/v1/spots/{id}`)는 끝난 항목도 반환하고 `is_ended: true`를 붙인다.
 
 ## 4. API (M1)
 
@@ -70,16 +70,16 @@
 |---|---|---|---|
 | GET | `/v1/regions/{region}/spots` | **지역 데이터 파일** (v1.6). `region`=`seoul`(그 외 404). 그 지역의 볼거리 중 **진행 중·앞으로 90일 안에 시작** + **종료 후 90일 안** 항목 전부(끝난 항목도 넣어 저장·상세가 오프라인에서도 보이게). 항목은 `Spot` 필드에서 `distance_m`·`saved_at` 제외, `is_ended`는 `generated_at` 기준. 본문 `{region, generated_at, count, items}`. `Accept-Encoding: gzip`이면 gzip, 강한 `ETag`(내용 해시) + `If-None-Match` → 304, `Cache-Control: public, max-age=3600`. 서버는 요청마다 조회하지 않고 메모리 캐시를 **최대 10분마다** 다시 만든다(내용이 같으면 ETag·`generated_at` 유지) | 신규 |
 | GET | `/v1/spots/{id}` | 상세 (좌표 없음) | 유지 |
-| GET | `/v1/spots` | `lat`, `lng`, `radius_m`, `category`, `when`, `free`, `q`(키워드: 제목·장소명·주소 부분 일치, 1~50자), `cursor`, `limit` → 거리순 | **폐기 예고** — 앱 전환 후 제거 (#74) |
-| GET | `/v1/spots/map` | 지도 영역(bbox: `sw_lat`, `sw_lng`, `ne_lat`, `ne_lng`) + `category`, `when`, `free`, 최대 `limit`(기본 200, 최대 500)개, 영역 중심에서 가까운 순. 넘치면 `truncated: true`. 클러스터는 앱에서 처리 | **폐기 예고** — 앱 전환 후 제거 (#74) |
-| GET | `/v1/geo/reverse` | 좌표 → 행정구역 이름(서버가 네이버 호출) | **폐기 예고** — 기기 지오코더로 대체, 앱 전환 후 제거 (#74) |
 | GET | `/v1/notices` | **공지사항 목록** (v1.8, 이슈 #80). 게시된 것(`published_at <= now`, 숨김 아님)만 최신순 최대 50개, 본문 없음. 본문 `{notices:[{id,title,published_at}]}`. `Cache-Control: public, max-age=60` | 신규 |
 | GET | `/v1/notices/{id}` | **공지사항 상세** (v1.8). 마크다운 `body` 포함. 없거나 숨김·게시 전이면 404 | 신규 |
 | GET | `/healthz` | 헬스체크 | 유지 |
 
+**제거됨** (v1.10, 이슈 #74, 2026-11-25): 좌표를 받던 `GET /v1/spots`(근처)·`GET /v1/spots/map`(bbox)·`GET /v1/geo/reverse`(역지오코딩). 두 앱이 지역 파일 + 기기 계산 + 기기 지오코더로 전환한 뒤 지웠다. 서버는 이 세 경로에 **410 Gone** + `{"code":"gone",...}`을 돌려준다(쿼리를 읽지 않음, openapi에는 없음). 옛 빌드(TestFlight 1–2, Play ≤4)는 이 경로를 써서 목록·지도가 깨지므로 테스터는 앱을 업데이트해야 한다.
+
 - 공지사항: `notices` 테이블(migrations/00008)은 Supabase Table Editor에서 작성한다(관리자 API 없음, [docs/ops/notices.md](../ops/notices.md)). 웹 공지 페이지(herezi.github.io/notices)가 브라우저에서 부르므로 `/v1/notices*`에만 CORS(`https://herezi.github.io`, `http://localhost:*`, GET·OPTIONS)를 연다.
 - `Spot.fetched_at`(원본에서 가져온 시각, 필수) — 상세 화면의 "갱신 시각".
-- 폐기 예고 엔드포인트는 openapi에 `deprecated: true`로 표시하고, iOS·Android가 지역 파일로 전환한 뒤 별도 PR로 지운다(그때 `logredact.go`의 좌표 파라미터 처리도 정리).
+- 접속 로그의 좌표 축약(`logredact.go`: `lat`·`lng`·`sw_*`·`ne_*`를 소수 둘째 자리로)은 엔드포인트를 지운 뒤에도 **방어용으로 남긴다** — 옛 앱이나 다른 클라이언트가 410 경로·다른 경로에 좌표를 붙여 보내도 원좌표가 로그에 남지 않게.
+- 서버의 역지오코딩 클라이언트(네이버 Reverse Geocoding·캐시)는 지웠다. 네이버 Geocoding(주소 → 좌표)은 수집 배치가 계속 쓴다.
 - 앱의 지역 파일 동기화: 앱 시작·포그라운드 복귀 때 `If-None-Match`로 확인(하루 1회 갱신이라 대부분 304). 받은 파일은 기기에 저장해 오프라인에서도 쓴다.
 - **지역 파일 크기 실측** (2026-11-25, 로컬 API + 수집 스냅샷 `data/snapshot.json` 2,696건, 이슈 #74 구현 PR):
 
@@ -115,7 +115,7 @@
 | 배치 | Railway 서비스 `ingest` (cron `0 20 * * *` UTC = 매일 05:00 KST) | `cmd/ingest -max-gpt 100` 하루 1회 실행 후 종료. 매일 DB에 쓰므로 Supabase 비활성 일시정지도 막는다 |
 | DB | **Supabase 무료** — 조직 `herezi`, 프로젝트 `herezi`, `ap-southeast-1`(싱가포르), PostGIS·pg_trgm | 관리형 Postgres. API와 같은 리전이라 지연이 짧다. 접속은 **session pooler**(IPv4, 5432) |
 | DB 노출 차단 | public 테이블 RLS + `anon`·`authenticated` 권한 회수 (마이그레이션 00005) | 앱은 DB에 직접 붙지 않고 `cmd/api`만 쓴다. Supabase Data API로 테이블이 열리지 않게 막는다 |
-| 비밀값 | Railway 서비스 변수 | `DATABASE_URL`, `NCP_MAPS_CLIENT_ID/SECRET`, `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY`, `KAKAO_REST_API_KEY`, `SUPABASE_URL`(+선택 `SUPABASE_JWT_SECRET`), `SUPABASE_SERVICE_ROLE_KEY`(탈퇴), `APPLE_TEAM_ID`·`APPLE_KEY_ID`·`APPLE_PRIVATE_KEY`(Apple 토큰 철회). 로컬은 `.env`(gitignore) |
+| 비밀값 | Railway 서비스 변수 | `DATABASE_URL`, `NCP_MAPS_CLIENT_ID/SECRET`(수집 배치 지오코딩만), `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY`, `KAKAO_REST_API_KEY`, `SUPABASE_URL`(+선택 `SUPABASE_JWT_SECRET`), `SUPABASE_SERVICE_ROLE_KEY`(탈퇴), `APPLE_TEAM_ID`·`APPLE_KEY_ID`·`APPLE_PRIVATE_KEY`(Apple 토큰 철회). 로컬은 `.env`(gitignore) |
 | 이미지 | 원본 URL 사용(M1) | 저장·가공은 M2에서 필요 시 |
 | 모니터링 | Railway 로그 + 수집 결과 요약 로그(리포트 표) | 수집 0건·급감은 로그로 확인(알림은 M2) |
 
@@ -148,7 +148,7 @@
 |---|---|---|
 | M0 기반 | 2026-11 말 ~ 12월 | 하네스(AGENTS.md·CI), API 키 발급, 데이터 실측, DB·배포 환경 |
 | M1-a 수집 | 12월 ~ 2027-01 중순 | 소스별 수집기, 지오코딩, GPT 보강, 중복 제거 |
-| M1-b API | 12월 ~ 2027-01 중순 | `/v1/spots` 실데이터 연결, 배포 |
+| M1-b API | 12월 ~ 2027-01 중순 | 실데이터 연결(지역 파일 `/v1/regions/{region}/spots`·상세), 배포 |
 | M1-c 앱 | 2027-01 ~ 02 중순 | 근처 목록·지도·필터·상세·길찾기, 위치 미허용 대응, 공유·찜·검색(P1) |
 | 베타 | 2027-02 말 | TestFlight · 내부 테스트 트랙, 봄꽃 데이터 점검 |
 | 출시 | 2027-03-16 | 스토어 출시 (심사 기간 고려해 3/9까지 제출) |
@@ -168,6 +168,7 @@
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
 | 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
 | 2026-11-24 | v1.4 | §5 인프라: GCP → Railway(API·수집 cron, 싱가포르) + Supabase 무료(조직·프로젝트 herezi, ap-southeast-1, session pooler), RLS·권한 회수(00005), 월 비용 추정, 7일 비활성 일시정지 메모 ([ADR 0003](../adr/0003-railway-supabase.md)) |
+| 2026-11-25 | v1.10 | **좌표 엔드포인트 제거**(이슈 #74, [ADR 0004](../adr/0004-no-location-send.md)): iOS·Android 전환 확인 후 §4에서 `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse` 삭제, 옛 경로는 410 Gone. 서버 역지오코딩 클라이언트 삭제(수집 지오코딩은 유지), 접속 로그 좌표 축약은 방어용으로 유지. openapi 0.11.0 |
 | 2026-11-25 | v1.9 | §4.1 Apple 토큰 철회(이슈 #72): 탈퇴 직전 iOS 재인증 코드 → 서버 교환·revoke, 토큰 저장 없음, 실패 시 삭제 중단. §5 비밀값 `APPLE_*` |
 | 2026-11-25 | v1.8 | §4 공지사항 `GET /v1/notices`·`GET /v1/notices/{id}`(이슈 #80): DB(`notices`) + Supabase Table Editor 작성, 공지 경로에만 CORS |
 | 2026-11-25 | v1.7 | §4.1 Android 로그인은 카카오만(Apple 웹 OAuth 경로 제거, herezi-android#41). Supabase Apple Client ID는 웹용 Services ID를 첫 번째로(`com.herezi.app.signin,com.herezi.app`) |

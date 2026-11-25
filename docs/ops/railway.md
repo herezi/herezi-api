@@ -20,7 +20,7 @@
 | 변수 | api | ingest |
 |---|---|---|
 | `DATABASE_URL` | ✓ | ✓ |
-| `NCP_MAPS_CLIENT_ID`, `NCP_MAPS_CLIENT_SECRET` | ✓ (역지오코딩) | ✓ (지오코딩) |
+| `NCP_MAPS_CLIENT_ID`, `NCP_MAPS_CLIENT_SECRET` | ✓ (미사용 — 역지오코딩 `/v1/geo/reverse`는 #74에서 제거) | ✓ (지오코딩) |
 | `KAKAO_REST_API_KEY` | ✓ | ✓ (장소명 검색) |
 | `DATA_GO_KR_SERVICE_KEY`, `SEOUL_OPENAPI_KEY`, `OPENAI_API_KEY` | ✓ (미사용) | ✓ |
 | `MIGRATE_ON_START=1` | ✓ (시작 시 goose 마이그레이션) | — |
@@ -97,7 +97,8 @@ railway logs --service api                              # 런타임 로그
 ```sh
 URL=https://api-production-4ebcf3e2.up.railway.app
 curl -s $URL/healthz
-curl -s "$URL/v1/spots?lat=37.5663&lng=126.9779&radius_m=3000&when=week&limit=5"
+curl -s -o /dev/null -w "%{http_code} %{size_download}B\n" -H "Accept-Encoding: gzip" $URL/v1/regions/seoul/spots   # 지역 파일 200
+curl -s -o /dev/null -w "%{http_code}\n" $URL/v1/spots       # 제거된 좌표 엔드포인트: 410 (#74)
 curl -s $URL/v1/notices                                     # 공지 목록(작성법: notices.md)
 ```
 

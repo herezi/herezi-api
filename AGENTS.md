@@ -4,7 +4,7 @@
 
 ## 이 레포는
 Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
-- `cmd/api`: 공개 REST API. **앱(iOS·Android)은 사용자 좌표를 서버로 보내지 않는다**(#74): 지역 데이터 파일(`GET /v1/regions/{region}/spots`)을 받아 근처·지도를 기기에서 계산한다(인증 없음). 좌표를 받는 `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 폐기 예고(앱 전환 후 제거). 로그인한 사용자의 저장 목록(`/v1/me/*`)만 Supabase JWT로 인증한다. 공지사항(`/v1/notices*`)은 웹 공지 페이지용 공개 읽기 API이고 이 경로에만 CORS를 연다(작성: [docs/ops/notices.md](docs/ops/notices.md)).
+- `cmd/api`: 공개 REST API. **앱(iOS·Android)은 사용자 좌표를 서버로 보내지 않는다**(#74): 지역 데이터 파일(`GET /v1/regions/{region}/spots`)을 받아 근처·지도를 기기에서 계산한다(인증 없음). 좌표를 받던 `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 2026-11-25에 제거했고 **410 Gone**으로 답한다(옛 앱 빌드용, `httpapi.GonePaths`). 상세 `/v1/spots/{id}`는 그대로. 로그인한 사용자의 저장 목록(`/v1/me/*`)만 Supabase JWT로 인증한다. 공지사항(`/v1/notices*`)은 웹 공지 페이지용 공개 읽기 API이고 이 경로에만 CORS를 연다(작성: [docs/ops/notices.md](docs/ops/notices.md)).
 - `cmd/ingest`: 공공데이터 수집 배치(수집 → 정규화 → 지오코딩 → 중복 제거 → GPT 보강 → 저장). DB가 없으면 JSON 스냅샷(`data/snapshot.json`, gitignore).
 - `api/openapi.yaml`: 서버·iOS·Android 사이 API 계약의 **단일 기준**.
 
@@ -26,13 +26,13 @@ api/openapi.yaml            API 계약 (단일 기준)
 cmd/api/                    API 서버 진입점 (환경 변수 → 저장소 선택 → HTTP)
 cmd/ingest/                 수집 배치 진입점 (-sources, -max-gpt, -out, -dry-run, -retain-ended-days, -excluded-cache, -show-excluded)
 internal/domain/            핵심 타입·규칙 (Spot, Category, When, 거리). 다른 internal 패키지 import 금지
-internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, NearbyQuery)
+internal/store/             저장소 인터페이스 (SpotReader/SpotWriter, BBoxQuery)
 internal/store/memory/      메모리 저장소 (테스트, DATABASE_URL 없을 때) + 서울 예시 데이터
 internal/store/postgres/    PostGIS 저장소 (GORM, 공간 조건은 raw 표현식)
 internal/store/storetest/   모든 저장소가 통과해야 하는 공통 테스트 스위트
 internal/httpapi/           HTTP 핸들러·라우트 테이블·계약 테스트
 internal/auth/              Supabase Auth JWT 검증(JWKS 캐시, ES256/RS256, 선택적 HS256), Admin API 삭제, Apple 토큰 철회. 표준 라이브러리만
-internal/geo/               역지오코딩·지오코딩 인터페이스, 네이버 클라이언트, 메모리 캐시
+internal/geo/               수집 배치용 지오코딩(네이버, 주소 → 좌표)·장소 검색(카카오). 서버 역지오코딩은 #74에서 제거
 internal/ingest/            수집 파이프라인(필터·지오코딩·중복 제거·GPT 보강), sources/(소스별 수집기), openai/(GPT 배치)
 internal/snapshot/          수집 결과 JSON 스냅샷 읽기·쓰기
 internal/config/            .env 로더 (cmd 공용)
@@ -61,9 +61,9 @@ docs/adr/                   ADR (NNNN-제목.md)
 4. **`api/openapi.yaml`이 계약의 단일 기준.** 엔드포인트·필드·enum을 바꾸면 openapi를 먼저(같은 PR에서) 고친다. 계약 테스트(`internal/httpapi/contract_test.go`)가 카테고리 enum·라우트·JSON 필드를 대조한다. 하위호환을 지킨다(필드 삭제·의미 변경 금지, 추가는 가능).
 5. **큰 결정은 ADR로.** 스택·저장소·외부 서비스·계층 규칙을 바꾸는 결정은 `docs/adr/NNNN-제목.md`로 남기고 TECH-PLAN.md도 함께 고친다.
 6. **계층 규칙을 지킨다.** [ARCHITECTURE.md](ARCHITECTURE.md) 참고. `domain`은 아무것도 import하지 않고, `cmd`만 구체 구현을 조립한다.
-7. **조회 규칙.** 끝난 행사(`ends_at < now`)는 목록(`/v1/spots`)·지도(`/v1/spots/map`)에 넣지 않는다. 상세(`/v1/spots/{id}`)는 끝난 행사도 200으로 돌려주고 `is_ended: true`를 붙인다(요청 시각 기준 계산). 무료는 카테고리가 아니라 `free=true` 필터다.
+7. **조회 규칙.** 근처 목록·지도는 앱이 지역 파일로 기기에서 만들고 끝난 행사(`ends_at < now`)를 숨긴다. 지역 파일은 종료 후 90일 안의 끝난 항목도 넣는다. 상세(`/v1/spots/{id}`)는 끝난 행사도 200으로 돌려주고 `is_ended: true`를 붙인다(요청 시각 기준 계산). 무료는 카테고리가 아니라 `free` 필터다.
 8. **DB 접근은 GORM, 스키마는 goose 마이그레이션.** 테이블·컬럼·인덱스는 `migrations/`에 새 SQL 파일로만 바꾼다. **`AutoMigrate` 금지**(PostGIS geography·GiST 인덱스를 표현할 수 없다). GORM 모델은 `internal/store/postgres` 안에만 두고 `domain`은 gorm을 import하지 않는다. 공간 조건은 raw 표현식에 `?` 바인딩으로. 저장소 동작을 바꾸면 `storetest` 스위트에 케이스를 추가해 메모리·postgres가 같은 결과를 내는지 확인한다.
-9. **로그 규칙(위치정보).** 원좌표는 로그에 남기지 않는다([개인정보 처리방침](https://herezi.github.io/privacy/)). 접속 로그 미들웨어(`internal/httpapi/logredact.go`)가 쿼리의 `lat`·`lng`·`sw_lat`·`sw_lng`·`ne_lat`·`ne_lng`를 소수 둘째 자리(약 1km)로 줄여 기록하고(`/v1/spots`, `/v1/spots/map`, `/v1/geo/reverse` 모두), 키·토큰·비밀값으로 보이는 파라미터는 값을 지운다. 에러 로그는 `logErr`로 남겨 요청 URL(좌표 포함)을 빼고, 외부 클라이언트(예: 네이버) 에러 메시지에도 URL을 넣지 않는다. **좌표를 받는 엔드포인트를 새로 만들지 않는다**(#74, 계약 테스트 `TestDeprecatedMatchesOpenAPI`가 좌표 파라미터는 폐기 예고 엔드포인트에만 있는지 확인). 지역 파일 엔드포인트는 좌표를 받지 않는다. **`Authorization` 헤더(JWT)·사용자 ID(`sub`)는 로그에 남기지 않는다**(`/v1/me/*`).
+9. **로그 규칙(위치정보).** 원좌표는 로그에 남기지 않는다([개인정보 처리방침](https://herezi.github.io/privacy/)). 접속 로그 미들웨어(`internal/httpapi/logredact.go`)가 쿼리의 `lat`·`lng`·`sw_lat`·`sw_lng`·`ne_lat`·`ne_lng`를 소수 둘째 자리(약 1km)로 줄여 기록하고(모든 경로 — 좌표 엔드포인트를 지운 뒤에도 옛 앱이 좌표를 붙여 보낼 수 있어 **방어용으로 유지**), 키·토큰·비밀값으로 보이는 파라미터는 값을 지운다. 에러 로그는 `logErr`로 남겨 요청 URL(좌표 포함)을 빼고, 외부 클라이언트(예: 네이버) 에러 메시지에도 URL을 넣지 않는다. **좌표를 받는 엔드포인트를 새로 만들지 않는다**(#74, 계약 테스트 `TestNoCoordinateEndpoints`가 openapi에 좌표 파라미터·deprecated 연산·지운 경로가 없는지 확인). 지역 파일 엔드포인트는 좌표를 받지 않는다. **`Authorization` 헤더(JWT)·사용자 ID(`sub`)는 로그에 남기지 않는다**(`/v1/me/*`).
 10. **비밀값을 커밋하지 않는다.** API 키·DB 접속 문자열은 환경 변수(운영은 Railway 서비스 변수).
 11. 문서·주석은 한국어, 코드 식별자는 영어.
 

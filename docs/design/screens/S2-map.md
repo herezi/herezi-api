@@ -10,7 +10,7 @@
 ## 데이터 (v1.4, SERVICE-PLAN §12 Q8)
 좌표·지도 영역을 서버로 보내지 않는다. 앱이 받아 둔 **지역 데이터 파일**(`GET /v1/regions/seoul/spots`)에서 기기가 고른다:
 끝난 항목 제외 → 보이는 영역(bbox) 안 → `when`·`category`·`free` 필터 → 영역 중심에서 가까운 순 최대 200개. 클러스터링도 앱에서.
-200개를 넘으면(이전의 `truncated: true`) 토스트로 확대를 권한다. 서버 `/v1/spots/map`은 쓰지 않는다(폐기 예정).
+200개를 넘으면(이전의 `truncated: true`) 토스트로 확대를 권한다. 서버 `/v1/spots/map`은 쓰지 않는다(#74에서 제거, 410).
 위치명은 기기 지오코더(iOS `CLGeocoder`, Android `Geocoder`).
 
 ## 레이아웃 (위→아래)
