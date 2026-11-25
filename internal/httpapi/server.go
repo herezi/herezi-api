@@ -1,5 +1,5 @@
 // Package httpapi implements the public HTTP API described in api/openapi.yaml.
-// It may import domain, store (interfaces), geo and auth (interface + types) only — never ingest or normalize
+// It may import domain, store (interfaces) and auth (interface + types) only — never ingest or normalize
 // (see ARCHITECTURE.md). Wiring of concrete stores happens in cmd/api.
 package httpapi
 
@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/herezi/herezi-api/internal/auth"
-	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/store"
 )
 
@@ -24,16 +23,15 @@ type Route struct {
 
 // Server holds handler dependencies.
 type Server struct {
-	spots    store.SpotReader
-	geocoder geo.ReverseGeocoder // nil이면 /v1/geo/reverse는 501
-	auth     auth.Verifier       // nil이면 /v1/me/*는 503 auth_not_configured
-	saved    store.SavedStore    // nil이면 /v1/me/saved*는 503 auth_not_configured
-	users    auth.UserDeleter    // nil이면 DELETE /v1/me는 503 auth_not_configured
-	apple    auth.AppleRevoker   // nil이면 Apple 사용자의 DELETE /v1/me는 503 auth_not_configured
-	notices  store.NoticeReader  // nil이면 /v1/notices*는 503 not_configured
-	regions  *regionCache        // 지역 데이터 파일 메모리 캐시(regions.go)
-	log      *slog.Logger
-	now      func() time.Time
+	spots   store.SpotReader
+	auth    auth.Verifier      // nil이면 /v1/me/*는 503 auth_not_configured
+	saved   store.SavedStore   // nil이면 /v1/me/saved*는 503 auth_not_configured
+	users   auth.UserDeleter   // nil이면 DELETE /v1/me는 503 auth_not_configured
+	apple   auth.AppleRevoker  // nil이면 Apple 사용자의 DELETE /v1/me는 503 auth_not_configured
+	notices store.NoticeReader // nil이면 /v1/notices*는 503 not_configured
+	regions *regionCache       // 지역 데이터 파일 메모리 캐시(regions.go)
+	log     *slog.Logger
+	now     func() time.Time
 }
 
 // Option configures a Server.
@@ -57,11 +55,7 @@ func (s *Server) Routes() []Route {
 		{http.MethodGet, "/healthz", s.healthz},
 		// 지역 데이터 파일(좌표를 받지 않음, 이슈 #74). 앱은 이것으로 근처·지도를 기기에서 계산한다.
 		{http.MethodGet, "/v1/regions/{region}/spots", s.regionSpots},
-		// 폐기 예고(openapi deprecated): 좌표를 받는 조회. 앱 전환 후 제거(#74).
-		{http.MethodGet, "/v1/spots", s.listSpots},
-		{http.MethodGet, "/v1/spots/map", s.listSpotsInBBox}, // 리터럴 경로라 {id}보다 우선
 		{http.MethodGet, "/v1/spots/{id}", s.getSpot},
-		{http.MethodGet, "/v1/geo/reverse", s.reverseGeocode},
 		// 로그인 사용자 전용(Authorization: Bearer <Supabase JWT>)
 		{http.MethodGet, "/v1/me/saved", s.authed(s.listSaved)},
 		{http.MethodPost, "/v1/me/saved:import", s.authed(s.importSaved)},
@@ -74,13 +68,28 @@ func (s *Server) Routes() []Route {
 	}
 }
 
+// GonePaths are endpoints removed in #74 (좌표를 받던 조회). openapi에는 없고, 옛 앱 빌드
+// (TestFlight 1–2, Play ≤4)가 조용히 404를 받는 대신 분명히 실패하도록 410 Gone + Error JSON을 돌려준다.
+// 쿼리(좌표 포함)는 읽지 않는다. 접속 로그의 좌표 축약(logredact.go)은 방어용으로 남긴다.
+var GonePaths = []string{"/v1/spots", "/v1/spots/map", "/v1/geo/reverse"}
+
 // Handler returns the root http.Handler with middleware applied.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, r := range s.Routes() {
 		mux.HandleFunc(r.Method+" "+r.Path, r.Handler)
 	}
+	for _, p := range GonePaths {
+		// "/v1/spots/map"은 리터럴 경로라 "/v1/spots/{id}"보다 우선한다.
+		mux.HandleFunc(http.MethodGet+" "+p, gone)
+	}
 	return s.recoverer(s.logRequests(s.noticeCORS(mux)))
+}
+
+// gone answers removed endpoints (GonePaths) with 410.
+func gone(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusGone, codeGone,
+		"this endpoint was removed (issue #74): the app no longer sends location; update the app (it uses GET /v1/regions/{region}/spots)")
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -100,6 +109,7 @@ const (
 	codeInternal         = "internal"
 	codeNotConfigured    = "not_configured"
 	codeUpstream         = "upstream_error"
+	codeGone             = "gone" // GonePaths(#74에서 제거한 좌표 엔드포인트)
 	// /v1/me/*
 	codeUnauthorized      = "unauthorized"
 	codeAuthNotConfigured = "auth_not_configured"

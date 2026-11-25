@@ -66,14 +66,10 @@ func TestCategoriesMatchOpenAPI(t *testing.T) {
 
 func TestWhenMatchesOpenAPI(t *testing.T) {
 	doc := loadOpenAPI(t)
-	var want []string
-	for _, p := range doc.Paths["/v1/spots"]["get"].Parameters {
-		if p.Name == "when" {
-			want = p.Schema.Enum
-		}
-	}
+	// /v1/spots(when 파라미터)는 #74에서 지웠다. 앱이 기기에서 쓰는 값은 components.schemas.When.
+	want := doc.Components.Schemas["When"].Enum
 	if len(want) == 0 {
-		t.Fatal("when enum not found in openapi")
+		t.Fatal("When enum not found in openapi")
 	}
 	for _, w := range want {
 		if _, err := domain.ParseWhen(w); err != nil {
@@ -112,11 +108,9 @@ func TestRoutesMatchOpenAPI(t *testing.T) {
 func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 	doc := loadOpenAPI(t)
 	for name, typ := range map[string]reflect.Type{
-		"Spot":       reflect.TypeFor[spotJSON](),
-		"SpotPage":   reflect.TypeFor[spotPageJSON](),
-		"SpotMap":    reflect.TypeFor[spotMapJSON](),
-		"Error":      reflect.TypeFor[errorBody](),
-		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
+		"Spot":     reflect.TypeFor[spotJSON](),
+		"SpotPage": reflect.TypeFor[spotPageJSON](),
+		"Error":    reflect.TypeFor[errorBody](),
 		// /v1/me/saved:import
 		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
 		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
@@ -148,11 +142,9 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
 	doc := loadOpenAPI(t)
 	for name, typ := range map[string]reflect.Type{
-		"Spot":       reflect.TypeFor[spotJSON](),
-		"SpotPage":   reflect.TypeFor[spotPageJSON](),
-		"SpotMap":    reflect.TypeFor[spotMapJSON](),
-		"Error":      reflect.TypeFor[errorBody](),
-		"GeoReverse": reflect.TypeFor[geoReverseJSON](),
+		"Spot":     reflect.TypeFor[spotJSON](),
+		"SpotPage": reflect.TypeFor[spotPageJSON](),
+		"Error":    reflect.TypeFor[errorBody](),
 		// /v1/me/saved:import
 		"SavedImportRequest": reflect.TypeFor[importSavedJSON](),
 		"SavedImportResult":  reflect.TypeFor[importResultJSON](),
@@ -188,18 +180,6 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 		names  []string
 		limits map[string]lim
 	}{
-		"/v1/spots": {
-			names: []string{"category", "cursor", "free", "lat", "limit", "lng", "q", "radius_m", "when"},
-			limits: map[string]lim{
-				"radius_m": {defaultRadiusM, minRadiusM, maxRadiusM},
-				"limit":    {defaultLimit, 1, maxLimit},
-			},
-		},
-		"/v1/spots/map": {
-			names:  []string{"category", "free", "limit", "ne_lat", "ne_lng", "sw_lat", "sw_lng", "when"},
-			limits: map[string]lim{"limit": {defaultMapLimit, 1, maxMapLimit}},
-		},
-		"/v1/geo/reverse": {names: []string{"lat", "lng"}},
 		"/v1/me/saved": {
 			names:  []string{"cursor", "limit"},
 			limits: map[string]lim{"limit": {defaultSavedLimit, 1, maxSavedLimit}},
@@ -222,22 +202,6 @@ func TestQueryParamsMatchOpenAPI(t *testing.T) {
 			t.Errorf("%s: openapi params %v, handled %v", path, names, want.names)
 		}
 	}
-}
-
-// TestKeywordLengthMatchesOpenAPI: q의 minLength/maxLength가 핸들러 제한과 같아야 한다.
-func TestKeywordLengthMatchesOpenAPI(t *testing.T) {
-	doc := loadOpenAPI(t)
-	for _, p := range doc.Paths["/v1/spots"]["get"].Parameters {
-		if p.Name != "q" {
-			continue
-		}
-		sc := p.Schema
-		if sc.MinLength == nil || sc.MaxLength == nil || *sc.MinLength != minQueryRunes || *sc.MaxLength != maxQueryRunes {
-			t.Fatalf("openapi q minLength=%v maxLength=%v, code [%d, %d]", sc.MinLength, sc.MaxLength, minQueryRunes, maxQueryRunes)
-		}
-		return
-	}
-	t.Fatal("q not found in openapi /v1/spots")
 }
 
 // TestMeContract: /v1/me/* 는 bearerAuth를 요구하고, 가져오기 개수·spot_id 길이 한도가 코드와 같아야 한다.
@@ -353,45 +317,38 @@ func TestRegionContract(t *testing.T) {
 	}
 }
 
-// TestDeprecatedMatchesOpenAPI: 좌표를 받는 조회만 deprecated이고, 설명이 제거 예고로 시작해야 한다(#74).
-func TestDeprecatedMatchesOpenAPI(t *testing.T) {
+// TestNoCoordinateEndpoints: 좌표를 받는 엔드포인트는 계약에 없다(#74, 0.11.0에서 제거).
+// deprecated 연산도 남아 있지 않아야 하고, 지운 경로(GonePaths)는 openapi paths에 없어야 한다.
+func TestNoCoordinateEndpoints(t *testing.T) {
 	b, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
 		Paths map[string]map[string]struct {
-			Deprecated  bool   `yaml:"deprecated"`
-			Description string `yaml:"description"`
+			Deprecated bool `yaml:"deprecated"`
 		} `yaml:"paths"`
 	}
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"GET /v1/geo/reverse", "GET /v1/spots", "GET /v1/spots/map"}
-	var got []string
 	for path, ops := range doc.Paths {
 		for method, op := range ops {
-			if !op.Deprecated {
-				continue
-			}
-			got = append(got, strings.ToUpper(method)+" "+path)
-			if !strings.HasPrefix(op.Description, "앱 전환 후 제거 (#74)") {
-				t.Errorf("%s %s: description must start with 앱 전환 후 제거 (#74), got %q", method, path, op.Description)
+			if op.Deprecated {
+				t.Errorf("%s %s is deprecated; remove it instead (#74)", method, path)
 			}
 		}
 	}
-	sort.Strings(got)
-	if !slices.Equal(got, want) {
-		t.Fatalf("deprecated ops %v, want %v", got, want)
+	for _, p := range GonePaths {
+		if _, ok := doc.Paths[p]; ok {
+			t.Errorf("%s was removed (#74) but is still in openapi", p)
+		}
 	}
-	// 좌표를 받는 파라미터(coordParams)는 deprecated 엔드포인트에만 있어야 한다.
-	params := loadOpenAPI(t).Paths
-	for path, ops := range params {
+	for path, ops := range loadOpenAPI(t).Paths {
 		for method, op := range ops {
 			for _, p := range op.Parameters {
-				if coordParams[p.Name] && !slices.Contains(want, strings.ToUpper(method)+" "+path) {
-					t.Errorf("%s %s takes coordinate %q but is not deprecated (#74: 앱은 좌표를 보내지 않는다)", method, path, p.Name)
+				if coordParams[p.Name] {
+					t.Errorf("%s %s takes coordinate %q (#74: 앱은 좌표를 보내지 않는다)", method, path, p.Name)
 				}
 			}
 		}

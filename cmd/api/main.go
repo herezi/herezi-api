@@ -6,8 +6,6 @@
 //   - MIGRATE_ON_START: "1"이면 시작할 때 goose 마이그레이션(migrations/)을 최신까지 적용한다(DATABASE_URL 필요).
 //   - SNAPSHOT_PATH: DATABASE_URL이 없을 때 메모리 저장소에 올릴 수집 스냅샷(cmd/ingest -out).
 //     없으면 예시 데이터(seed).
-//   - NCP_MAPS_CLIENT_ID / NCP_MAPS_CLIENT_SECRET: 네이버 클라우드 Maps 키(역지오코딩).
-//     없으면 /v1/geo/reverse는 501.
 //   - SUPABASE_URL: Supabase 프로젝트 URL(https://<ref>.supabase.co). 로그인 토큰(JWT)을 이 프로젝트의
 //     JWKS로 검증한다(iss = SUPABASE_URL/auth/v1). 없으면 /v1/me/*는 503 auth_not_configured.
 //   - SUPABASE_JWT_SECRET: (선택) 레거시 HS256 JWT 비밀값. 있으면 HS256 토큰도 받는다.
@@ -34,7 +32,6 @@ import (
 
 	"github.com/herezi/herezi-api/internal/auth"
 	"github.com/herezi/herezi-api/internal/config"
-	"github.com/herezi/herezi-api/internal/geo"
 	"github.com/herezi/herezi-api/internal/httpapi"
 	"github.com/herezi/herezi-api/internal/snapshot"
 	"github.com/herezi/herezi-api/internal/store"
@@ -94,15 +91,7 @@ func run(log *slog.Logger) error {
 		log.Warn("store: memory with seed data (DATABASE_URL and SNAPSHOT_PATH not set)")
 	}
 
-	var opts []httpapi.Option
-	if id, secret := os.Getenv("NCP_MAPS_CLIENT_ID"), os.Getenv("NCP_MAPS_CLIENT_SECRET"); id != "" && secret != "" {
-		opts = append(opts, httpapi.WithGeocoder(geo.NewCache(geo.NewNaver(id, secret), geo.DefaultCacheTTL)))
-		log.Info("geocoder: naver")
-	} else {
-		log.Warn("geocoder: disabled (NCP_MAPS_CLIENT_ID/SECRET not set), /v1/geo/reverse returns 501")
-	}
-
-	opts = append(opts, httpapi.WithSaved(saved), httpapi.WithNotices(notices))
+	opts := []httpapi.Option{httpapi.WithSaved(saved), httpapi.WithNotices(notices)}
 	if u := os.Getenv("SUPABASE_URL"); u != "" {
 		secret := os.Getenv("SUPABASE_JWT_SECRET")
 		opts = append(opts, httpapi.WithAuth(auth.NewSupabase(auth.SupabaseConfig{URL: u, JWTSecret: secret})))

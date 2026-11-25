@@ -56,7 +56,7 @@
 좌우 여백 20, 섹션 사이 `space.8`(32). 목업 기준 390pt 폭.
 
 1. **상단 바** (높이 56, 스크롤하면 같이 올라감 — 큰 헤드라인과 한 덩어리)
-   - 왼쪽: 위치 아이콘(`mappin`·채움 / `location_on`, 18, `text.secondary`) + 현재 위치명 `type.bodyStrong` `text.secondary` (예: **중구 태평로1가**). 위치 거부 시 **서울시청 주변**, 기기 지오코더(iOS `CLGeocoder`, Android `Geocoder` — 서버 `/v1/geo/reverse`는 쓰지 않음) 실패 시 **내 주변**. 누르는 동작 없음(M1에 위치 바꾸기 없음 — 비교안의 `⌄`는 넣지 않는다).
+   - 왼쪽: 위치 아이콘(`mappin`·채움 / `location_on`, 18, `text.secondary`) + 현재 위치명 `type.bodyStrong` `text.secondary` (예: **중구 태평로1가**). 위치 거부 시 **서울시청 주변**, 기기 지오코더(iOS `CLGeocoder`, Android `Geocoder` — 서버 `/v1/geo/reverse`는 #74에서 제거) 실패 시 **내 주변**. 누르는 동작 없음(M1에 위치 바꾸기 없음 — 비교안의 `⌄`는 넣지 않는다).
    - 오른쪽: 검색 아이콘 버튼 → S5.
 2. **헤드라인** `type.display`(26/36 Bold), 2줄, 위 `space.2`:
    - **지금 근처에 / 볼거리 {N}개 있어요** — N = 진행 중 항목 수.

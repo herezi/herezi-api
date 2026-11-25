@@ -22,8 +22,8 @@
 | `internal/domain` | 표준 라이브러리만 | 다른 모든 internal 패키지 |
 | `internal/store` | `domain` | 구현체(`memory`, `postgres`), `httpapi` |
 | `internal/store/memory`, `internal/store/postgres` | `domain`, `store` | `httpapi`, 서로 |
-| `internal/httpapi` | `domain`, `store`(인터페이스), `geo`·`auth`(인터페이스·타입) | 구체 저장소, ingest 관련 패키지 |
-| `internal/geo` | `domain`, 표준 라이브러리 | `store`, `httpapi`, ingest 관련 패키지 |
+| `internal/httpapi` | `domain`, `store`(인터페이스), `auth`(인터페이스·타입) | 구체 저장소, `geo`, ingest 관련 패키지 |
+| `internal/geo` | `domain`, 표준 라이브러리 | `store`, `httpapi`, ingest 관련 패키지 (수집 배치 전용: 네이버 지오코딩·카카오 장소 검색) |
 | `internal/auth` | 표준 라이브러리만 | 다른 모든 internal 패키지 |
 | `internal/snapshot` | `domain` | 나머지 internal |
 | `internal/config` | 표준 라이브러리만 | 나머지 internal |
@@ -32,17 +32,9 @@
 | `cmd/*` | 모두 | — (조립만 하고 로직을 두지 않는다) |
 | `internal/store/storetest` | `domain`, `store` | 구현체 (구현체의 테스트가 이 패키지를 부른다) |
 
-## 핵심 흐름: `GET /v1/spots` (폐기 예고, #74 — 앱은 지역 데이터 파일로 전환)
-1. `httpapi`가 쿼리 파라미터를 검증·파싱 → 잘못되면 400 + `Error{code, message}`.
-2. `when`을 `domain.When.Window(now)`로 [from, to] 구간으로 바꾸고 `store.NearbyQuery`를 만든다.
-3. 저장소가 반경·카테고리·무료·기간 겹침·키워드(`q`: 제목·장소명·주소 ILIKE, pg_trgm 인덱스)·**끝난 행사 제외** 조건으로 거리순 조회.
-   - 메모리: 하버사인 거리(`domain.DistanceM`)로 같은 의미를 흉내낸다.
-   - postgres: `geography` + `ST_DWithin`/`ST_Distance` (GiST 인덱스).
-4. `limit+1`개를 받아 다음 페이지 유무를 판단하고, 불투명 커서(`next_cursor`)를 돌려준다.
-
-`GET /v1/spots/map`도 같은 필터(끝난 행사 제외)를 쓴다. 반면 **상세 `GET /v1/spots/{id}`는 끝난 행사도 반환한다**:
-저장소 `SpotByID`는 시각 조건 없이 ID로만 찾고(없으면 `ErrNotFound` → 404), 핸들러가 요청 시계(`s.now()`)로
-`is_ended`(= `domain.Spot.Ended(now)`)를 계산해 붙인다. 목록·지도 응답의 `is_ended`는 항상 `false`다.
+## 상세: `GET /v1/spots/{id}`
+**상세는 끝난 행사도 반환한다**: 저장소 `SpotByID`는 시각 조건 없이 ID로만 찾고(없으면 `ErrNotFound` → 404), 핸들러가 요청 시계(`s.now()`)로
+`is_ended`(= `domain.Spot.Ended(now)`)를 계산해 붙인다. 근처 목록·지도는 서버가 아니라 앱이 지역 데이터 파일로 기기에서 만든다(아래).
 
 ## 지역 데이터 파일: `GET /v1/regions/{region}/spots` (이슈 #74)
 앱은 사용자 좌표를 서버로 보내지 않는다. 지역 전체 데이터를 받아 거리·근처·지도·정렬·검색을 기기에서 계산한다.
@@ -54,13 +46,14 @@
    다시 만들기가 실패하면 이전 본문을 주고 1분 뒤 재시도, 이전 본문이 없으면 500. 수집(cron)은 별도 프로세스라 반영은 최대 10분 늦다.
 4. 응답 헤더: `ETag`, `Cache-Control: public, max-age=3600`, `Vary: Accept-Encoding`, gzip이면 `Content-Encoding: gzip`.
 
-`/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 openapi `deprecated` — 앱 전환 후 제거한다.
-
-## 역지오코딩: `GET /v1/geo/reverse` (폐기 예고, #74)
-- 네이버 Reverse Geocoding은 Client Secret이 필요하므로 앱 대신 서버가 부른다.
-- `internal/geo`: `ReverseGeocoder` 인터페이스, 네이버 클라이언트(`Naver`, 타임아웃 2초), 메모리 캐시(`Cache`, 좌표 소수 3자리 반올림·TTL 1일, 실패는 캐시 안 함).
-- `cmd/api`가 `NCP_MAPS_CLIENT_ID`/`NCP_MAPS_CLIENT_SECRET`이 있을 때만 `Cache(Naver)`를 `httpapi.WithGeocoder`로 꽂는다. 없으면 501.
-- 핸들러 테스트는 가짜 `ReverseGeocoder`, 네이버 클라이언트는 `httptest`로 요청·파싱을 검증한다.
+## 제거한 좌표 엔드포인트 (#74, 2026-11-25)
+좌표를 받던 `GET /v1/spots`(근처)·`GET /v1/spots/map`(bbox)·`GET /v1/geo/reverse`(역지오코딩)는 두 앱의 전환을 확인한 뒤 지웠다.
+- 라우트 표(`Routes()`·openapi)에는 없고, `httpapi.GonePaths`가 이 세 경로를 **410 Gone** + `Error{code: "gone"}`으로 답한다(쿼리를 읽지 않음).
+  옛 빌드(TestFlight 1–2, Play ≤4)가 404 대신 분명한 오류를 받게 하려는 것이다. `/v1/spots/map`은 리터럴 경로라 `/v1/spots/{id}`보다 우선한다.
+- 서버 역지오코딩 클라이언트(네이버 Reverse Geocoding·캐시)도 지웠다. `internal/geo`에는 수집 배치용 지오코딩(주소 → 좌표)·장소 검색만 남는다.
+- 접속 로그의 좌표 축약(`logredact.go`)은 **방어용으로 남긴다** — 옛 앱 등이 좌표를 붙여 보내도 원좌표가 로그에 남지 않게.
+- 계약 테스트 `TestNoCoordinateEndpoints`: openapi에 좌표 파라미터·deprecated 연산·지운 경로가 없어야 한다.
+- 저장소의 `NearbySpots`(+ `pg_trgm` 키워드 조건)는 HTTP에서 더 쓰지 않는다. 정리는 후속 작업.
 
 ## 인증·저장: `/v1/me/*` (이슈 #56, TECH-PLAN §4.1)
 - 앱은 카카오·Apple → Supabase Auth 로그인 후 받은 access token을 `Authorization: Bearer <JWT>`로 보낸다. 조회 API는 인증 없이 그대로.

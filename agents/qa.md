@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit
 1. 대상 이슈/PR의 **수용 기준**을 읽고 테스트 케이스 표를 만든다: 정상·경계·오류·상태(로딩/빈/오류/위치 거부/오프라인).
 2. 자동화할 수 있는 건 테스트로 추가한다(테스트 파일만 수정). 제품 코드 버그는 고치지 말고 보고한다.
 3. 실행해서 확인한다:
-   - **herezi-api**: `make check`, `make run` 후 `curl`로 `/v1/spots` 등 호출 → 응답을 openapi와 대조(필드·타입·오류 형식), 끝난 행사가 안 나오는지, 반경·필터·정렬.
+   - **herezi-api**: `make check`, `make run` 후 `curl`로 `/v1/regions/seoul/spots`·`/v1/spots/{id}` 등 호출 → 응답을 openapi와 대조(필드·타입·오류 형식), 지역 파일의 보존 창(진행 중·90일 안 시작·종료 후 90일)·ETag/304, 상세 `is_ended`. 제거된 좌표 엔드포인트(`/v1/spots`·`/v1/spots/map`·`/v1/geo/reverse`)는 410.
    - **herezi-ios**: `make check`, 시뮬레이터 실행(`xcrun simctl`), 화면 캡처(`xcrun simctl io booted screenshot <path>`)로 상태별 화면 확인. 다크 모드·큰 글씨도 1회.
    - **herezi-android**: `make check`(`testDebugUnitTest`), 에뮬레이터가 있으면 `adb exec-out screencap -p`. 에뮬레이터 이미지는 새로 받지 않는다(디스크 제한).
    - 디자인 스펙(`herezi-api/docs/design/`)이 있으면 스크린샷과 비교.

@@ -1,3 +1,7 @@
+// Package geo는 수집 배치(cmd/ingest)가 쓰는 지오코딩(주소 → 좌표, 네이버)과 장소 검색(카카오)을 다룬다.
+// 외부 서비스는 인터페이스(Geocoder, PlaceSearcher) 뒤에 숨겨 파이프라인은 가짜 구현으로 테스트한다.
+// 역지오코딩(/v1/geo/reverse)은 #74로 제거했다 — 앱은 기기 지오코더를 쓴다.
+// domain 외의 internal 패키지를 import하지 않는다.
 package geo
 
 import (
@@ -16,7 +20,7 @@ import (
 // NaverGeocodeURL은 네이버 클라우드 Maps Geocoding(주소 → 좌표) 엔드포인트.
 const NaverGeocodeURL = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
 
-// NaverGeocodeTimeout은 배치(수집)용이라 역지오코딩보다 넉넉하다.
+// NaverGeocodeTimeout은 배치(수집)용 제한 시간.
 const NaverGeocodeTimeout = 5 * time.Second
 
 // Point는 지오코딩 결과 좌표. 결과가 없으면 OK가 false.

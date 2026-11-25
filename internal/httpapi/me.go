@@ -13,7 +13,7 @@ import (
 	"github.com/herezi/herezi-api/internal/store"
 )
 
-// /v1/me/* — 로그인한 사용자 전용(TECH-PLAN.md §4.1, 이슈 #56). 조회 API(/v1/spots 등)는 인증 없이 그대로다.
+// /v1/me/* — 로그인한 사용자 전용(TECH-PLAN.md §4.1, 이슈 #56). 조회 API(/v1/regions/*, /v1/spots/{id} 등)는 인증 없이 그대로다.
 
 // Parameter limits from api/openapi.yaml (/v1/me/saved).
 const (

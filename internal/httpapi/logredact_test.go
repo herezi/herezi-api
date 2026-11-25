@@ -2,7 +2,6 @@ package httpapi_test
 
 import (
 	"bytes"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -26,58 +25,52 @@ func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(
 func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
 
 // 원좌표(소수 6자리)로 요청해도 로그에는 소수 둘째 자리만 남아야 한다.
+// 좌표를 받는 엔드포인트는 #74에서 지웠지만(410), 옛 앱이 계속 좌표를 붙여 보낼 수 있으므로 방어용으로 유지한다.
 func TestAccessLogCoarsensCoordinates(t *testing.T) {
-	upstreamErr := &url.Error{Op: "Get", URL: "https://maps.example/gc?coords=126.977945,37.566312", Err: errors.New("timeout")}
 	for _, tc := range []struct {
 		name    string
 		path    string
 		params  url.Values
-		geo     *fakeGeocoder
 		want    []string
 		forbids []string
 	}{
 		{
-			name:    "spots",
+			name:    "removed spots",
 			path:    "/v1/spots",
 			params:  url.Values{"lat": {"37.566312"}, "lng": {"126.977945"}, "q": {"축제"}, "api_key": {"s3cr3t"}},
-			want:    []string{"lat=37.57", "lng=126.98", "q=", "api_key=REDACTED"},
+			want:    []string{"lat=37.57", "lng=126.98", "q=", "api_key=REDACTED", "status=410"},
 			forbids: []string{"s3cr3t"},
 		},
 		{
-			name: "map",
+			name: "removed map",
 			path: "/v1/spots/map",
 			params: url.Values{"sw_lat": {"37.551234"}, "sw_lng": {"126.961234"}, "ne_lat": {"37.581234"},
 				"ne_lng": {"126.991234"}, "limit": {"50"}},
-			want: []string{"sw_lat=37.55", "sw_lng=126.96", "ne_lat=37.58", "ne_lng=126.99", "limit=50"},
+			want: []string{"sw_lat=37.55", "sw_lng=126.96", "ne_lat=37.58", "ne_lng=126.99", "limit=50", "status=410"},
 		},
 		{
-			name:   "geo reverse",
+			name:   "removed geo reverse",
 			path:   "/v1/geo/reverse",
 			params: url.Values{"lat": {"37.566312"}, "lng": {"126.977945"}},
-			geo:    &fakeGeocoder{},
-			want:   []string{"lat=37.57", "lng=126.98", "status=200"},
-		},
-		{
-			name:   "geo reverse upstream error",
-			path:   "/v1/geo/reverse",
-			params: url.Values{"lat": {"37.566312"}, "lng": {"126.977945"}},
-			geo:    &fakeGeocoder{err: upstreamErr},
-			want:   []string{"lat=37.57", "status=502", "reverse geocode failed", "timeout"},
+			want:   []string{"lat=37.57", "lng=126.98", "status=410"},
 		},
 		{
 			name:   "invalid coordinate",
 			path:   "/v1/spots",
 			params: url.Values{"lat": {"37.566312abc"}, "lng": {"126.977945"}},
-			want:   []string{"lat=REDACTED", "lng=126.98", "status=400"},
+			want:   []string{"lat=REDACTED", "lng=126.98", "status=410"},
+		},
+		{
+			name:   "coordinates on a kept endpoint",
+			path:   "/v1/regions/seoul/spots",
+			params: url.Values{"lat": {"37.566312"}, "lng": {"126.977945"}},
+			want:   []string{"lat=37.57", "lng=126.98", "status=200"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf syncBuf
 			log := slog.New(slog.NewTextHandler(&buf, nil))
 			opts := []httpapi.Option{httpapi.WithClock(func() time.Time { return storetest.Now })}
-			if tc.geo != nil {
-				opts = append(opts, httpapi.WithGeocoder(tc.geo))
-			}
 			srv := httptest.NewServer(httpapi.New(memory.New(storetest.Fixtures()...), log, opts...).Handler())
 			defer srv.Close()
 

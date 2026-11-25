@@ -171,9 +171,9 @@ func TestMeNotConfigured(t *testing.T) {
 		t.Fatalf("status %d code %q", res.StatusCode, e.Code)
 	}
 	// 공개 조회 API는 인증 설정과 무관하게 그대로 동작한다.
-	var p page
-	if res := get(t, srv, "/v1/spots", near(), &p); res.StatusCode != http.StatusOK {
-		t.Fatalf("/v1/spots status %d", res.StatusCode)
+	var s spot
+	if res := get(t, srv, "/v1/spots/test:mid-popup", nil, &s); res.StatusCode != http.StatusOK {
+		t.Fatalf("/v1/spots/{id} status %d", res.StatusCode)
 	}
 }
 
