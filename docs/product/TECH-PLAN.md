@@ -3,8 +3,8 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | **승인됨** (2026-11-20, 위임 승인) |
-| 버전 | v1.6 (2026-11-25) |
-| 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.4, [DATA-PLAN.md](DATA-PLAN.md) v1.4 |
+| 버전 | v1.7 (2026-11-25) |
+| 근거 | [SERVICE-PLAN.md](SERVICE-PLAN.md) v1.5, [DATA-PLAN.md](DATA-PLAN.md) v1.4 |
 | 출시 목표 | 2027년 3월 16일, 서울, iOS · Android 동시 |
 
 > 에이전트 규칙: 기술 선택을 바꾸려면 이 문서를 먼저 고치고 PR로 남긴다. 큰 결정은 `docs/adr/`에 ADR로 기록한다.
@@ -93,7 +93,7 @@
 
 | 항목 | 결정 |
 |---|---|
-| 로그인 | 카카오, Apple (필수 둘 다). 앱이 각 SDK로 로그인 → **Supabase Auth**에 ID 토큰으로 로그인(`signInWithIdToken`, provider kakao/apple) → Supabase 세션(JWT) |
+| 로그인 | iOS: 카카오 + Apple, Android: 카카오만 (SERVICE-PLAN §12 Q6). 앱이 각 SDK로 로그인 → **Supabase Auth**에 ID 토큰으로 로그인(`signInWithIdToken`, provider kakao/apple) → Supabase 세션(JWT) |
 | API 인증 | `Authorization: Bearer <Supabase JWT>`. API는 Supabase JWKS로 서명·만료 검증, `sub`=user_id. 조회 API는 인증 불필요 |
 | 저장 테이블 | `saved_spots(user_id uuid, spot_id text, saved_at timestamptz, PK(user_id, spot_id))` + RLS(본인 행만). API는 서비스 역할로 접근 |
 | 엔드포인트 | `GET /v1/me/saved`(스팟 스냅샷 포함, 끝난 항목 `is_ended`, 저장 최신순, 커서 페이지), `PUT /v1/me/saved/{spot_id}`(멱등, 없는 볼거리 404), `DELETE /v1/me/saved/{spot_id}`(멱등), `POST /v1/me/saved:import`(로컬 저장분 일괄 이전, 최대 200개), `DELETE /v1/me`(회원 탈퇴: 저장 삭제 + Supabase 사용자 삭제). 사용자당 최대 500개 |
@@ -164,5 +164,6 @@
 | 2026-11-20 | v1.2 | 출시 3/16로 당김(일정 조정), 상세는 끝난 항목도 반환 |
 | 2026-11-24 | v1.3 | §4.1 인증·저장(카카오·Apple → Supabase Auth, /v1/me/saved), 끝난 볼거리 90일 보존 |
 | 2026-11-24 | v1.4 | §5 인프라: GCP → Railway(API·수집 cron, 싱가포르) + Supabase 무료(조직·프로젝트 herezi, ap-southeast-1, session pooler), RLS·권한 회수(00005), 월 비용 추정, 7일 비활성 일시정지 메모 ([ADR 0003](../adr/0003-railway-supabase.md)) |
+| 2026-11-25 | v1.7 | §4.1 Android 로그인은 카카오만(Apple 웹 OAuth 경로 제거, herezi-android#41). Supabase Apple Client ID는 웹용 Services ID를 첫 번째로(`com.herezi.app.signin,com.herezi.app`) |
 | 2026-11-25 | v1.6 | **위치 비전송**(SERVICE-PLAN v1.4 §12 Q8, 이슈 #74, [ADR 0004](../adr/0004-no-location-send.md)): §1 구조도(지역 파일 → 기기 계산), §2 결정 추가, §4 `GET /v1/regions/{region}/spots` 신규, `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse` 폐기 예고. §4.1은 변경 없음 |
 | 2026-11-24 | v1.5 | §4.1 구현 세부(이슈 #56): `POST /v1/me/saved:import`, 사용자당 500개, 서버 설정(`SUPABASE_URL`·선택 `SUPABASE_JWT_SECRET`·`SUPABASE_SERVICE_ROLE_KEY`), 저장 행 CASCADE 정리, 탈퇴 순서 |

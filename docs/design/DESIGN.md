@@ -399,13 +399,13 @@
 ### 6.17 로그인 시트 `LoginSheet`
 화면 스펙: [S7-login.md](screens/S7-login.md) · 목업: [mockups/login-sheet.png](mockups/login-sheet.png)
 - 모달 바텀시트, 스크림 `color.scrim`, 위 모서리 `radius.xl`, `elevation.2`, 손잡이 36×4 `gray200`. 높이는 내용에 맞춤.
-- 구성(위→아래): 닫기(오른쪽 위 `xmark`/`close`) → 제목 `type.title2` → 이유 한 줄 `type.body` `text.secondary` → (오류 줄) → `SocialLoginButton` 카카오 → Apple(사이 12) → 약관 안내 `type.caption` 가운데(링크 2개 밑줄).
+- 구성(위→아래): 닫기(오른쪽 위 `xmark`/`close`) → 제목 `type.title2` → 이유 한 줄 `type.body` `text.secondary` → (오류 줄) → `SocialLoginButton` 카카오 → Apple(사이 12, **iOS만**. Android는 카카오 버튼 하나) → 약관 안내 `type.caption` 가운데(링크 2개 밑줄).
 - 입력: `title`, `pendingAction`(저장할 spot id 또는 없음). 성공하면 시트를 닫고 `pendingAction`을 실행한다.
 - 상태: 기본 / 진행 중(누른 버튼에 진행 표시, 나머지·닫기 비활성, 끌어서 닫기 막음) / 취소됨(조용히 기본으로) / 오류(오류 줄 + 같은 버튼으로 재시도).
 - **로그인 UI는 이 시트 한 곳에만 둔다.** S4·S6의 "로그인"은 이 시트를 여는 버튼일 뿐 소셜 버튼을 따로 그리지 않는다.
 
 ### 6.18 소셜 로그인 버튼 `SocialLoginButton`
-두 버튼은 **같은 크기**: 높이 56(다이나믹 타입에 따라 늘어남, 최소 56), 폭 꽉 채움, 모서리 12, 심볼 24는 왼쪽 20, 글자는 버튼 가운데 `type.title3`(17 SemiBold). 그림자·테두리 없음. 순서는 **카카오 → Apple**(두 플랫폼 같음).
+두 버튼은 **같은 크기**: 높이 56(다이나믹 타입에 따라 늘어남, 최소 56), 폭 꽉 채움, 모서리 12, 심볼 24는 왼쪽 20, 글자는 버튼 가운데 `type.title3`(17 SemiBold). 그림자·테두리 없음. 순서는 **카카오 → Apple**. Apple 버튼은 iOS에만 있다(Android는 카카오만, SERVICE-PLAN §12 Q6).
 
 | | 카카오 `KakaoLoginButton` | Apple `AppleLoginButton` |
 |---|---|---|
@@ -468,5 +468,5 @@
 | 로그인 버튼 순서 | 카카오 → Apple (§6.18) | 국내 사용자 기준 결정. 심사에서 문제 되면 Apple을 위로 |
 | 약관·개인정보 처리방침 갱신 | S7 약관 안내가 기존 링크를 씀 | **로그인 출시 전 필수** — 카카오/Apple 계정 식별자 수집 항목 추가(TECH-PLAN §4.1) |
 | Apple 탈퇴 토큰 철회 | 서버 revoke 전제(S6 개발자 주의) | 서버가 refresh token을 보관할지, 탈퇴 직전 재인증할지 서버 이슈에서 결정 |
-| Android Apple 로그인 복귀 | Custom Tabs + 앱 딥링크(S7) | Supabase 리다이렉트 URL·Apple Services ID 설정 필요 |
+| Android Apple 로그인 | 넣지 않음 (2026-11-25 결정) | iOS에서 Apple로 가입한 계정은 Android 설정 화면에 "Apple로 로그인됨"으로 표시만 될 수 있다 |
 | 카카오 로그인 버튼 글자 | "카카오로 계속하기" | 가이드가 허용하는 문구 범위 안 — 카카오 앱 검수 때 확인 |
