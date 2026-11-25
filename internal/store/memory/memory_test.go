@@ -15,3 +15,7 @@ func TestStore(t *testing.T) {
 func TestSaved(t *testing.T) {
 	storetest.RunSaved(t, func(*testing.T) storetest.SavedSpotStore { return memory.New() })
 }
+
+func TestNotices(t *testing.T) {
+	storetest.RunNotices(t, func(*testing.T) store.NoticeStore { return memory.New() })
+}

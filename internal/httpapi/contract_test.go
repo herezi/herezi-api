@@ -11,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/herezi/herezi-api/internal/domain"
+	"github.com/herezi/herezi-api/internal/store"
 )
 
 // 계약 테스트: api/openapi.yaml(단일 기준)과 코드가 어긋나면 실패한다.
@@ -122,6 +123,10 @@ func TestJSONFieldsMatchOpenAPI(t *testing.T) {
 		// /v1/regions/{region}/spots
 		"RegionSpots": reflect.TypeFor[regionSpotsJSON](),
 		"RegionSpot":  reflect.TypeFor[regionSpotJSON](),
+		// /v1/notices
+		"NoticeList":    reflect.TypeFor[noticeListJSON](),
+		"NoticeSummary": reflect.TypeFor[noticeSummaryJSON](),
+		"Notice":        reflect.TypeFor[noticeJSON](),
 	} {
 		var got, want []string
 		for i := range typ.NumField() {
@@ -154,6 +159,10 @@ func TestRequiredFieldsMatchOpenAPI(t *testing.T) {
 		// /v1/regions/{region}/spots
 		"RegionSpots": reflect.TypeFor[regionSpotsJSON](),
 		"RegionSpot":  reflect.TypeFor[regionSpotJSON](),
+		// /v1/notices
+		"NoticeList":    reflect.TypeFor[noticeListJSON](),
+		"NoticeSummary": reflect.TypeFor[noticeSummaryJSON](),
+		"Notice":        reflect.TypeFor[noticeJSON](),
 	} {
 		var got []string
 		for i := range typ.NumField() {
@@ -386,5 +395,28 @@ func TestDeprecatedMatchesOpenAPI(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestNoticeContract: 목록 maxItems가 store.MaxNotices와 같아야 한다.
+func TestNoticeContract(t *testing.T) {
+	b, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					MaxItems *int `yaml:"maxItems"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if m := doc.Components.Schemas["NoticeList"].Properties["notices"].MaxItems; m == nil || *m != store.MaxNotices {
+		t.Fatalf("NoticeList.notices maxItems = %v, code %d", m, store.MaxNotices)
 	}
 }

@@ -7,8 +7,11 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -111,5 +114,91 @@ func TestEnrichedSpots(t *testing.T) {
 	one, err := s.SpotByID(ctx, b.ID)
 	if err != nil || one.ContentHash != "h2" {
 		t.Fatalf("SpotByID content_hash = %q, %v", one.ContentHash, err)
+	}
+}
+
+// 공지사항(notices, migrations/00008): 메모리와 같은 스위트. 마이그레이션이 넣은 첫 공지는 지우고 시작한다.
+func TestNotices(t *testing.T) {
+	url := os.Getenv("HEREZI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("HEREZI_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	storetest.RunNotices(t, func(t *testing.T) store.NoticeStore {
+		resetSchema(t, url)
+		db, err := sql.Open("pgx", url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.ExecContext(ctx, "DELETE FROM notices"); err != nil {
+			t.Fatal(err)
+		}
+		s, err := postgres.Open(ctx, url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
+}
+
+// 마이그레이션 00008의 첫 공지가 게시 상태로 들어가고, 고치면 updated_at이 바뀌며, RLS가 켜져 있다.
+func TestNoticesMigrationSeed(t *testing.T) {
+	url := os.Getenv("HEREZI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("HEREZI_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	resetSchema(t, url)
+	s, err := postgres.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, domain.Seoul)
+	list, err := s.Notices(ctx, now, store.MaxNotices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Title != "히어지 테스트를 시작했어요" ||
+		!list[0].PublishedAt.Equal(time.Date(2026, 11, 25, 0, 0, 0, 0, domain.Seoul)) {
+		t.Fatalf("seed notices = %+v", list)
+	}
+	n, err := s.NoticeByID(ctx, list[0].ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"내부 테스트", "공개된 자료", "정보가 달라요"} {
+		if !strings.Contains(n.Body, want) {
+			t.Errorf("seed body missing %q: %q", want, n.Body)
+		}
+	}
+
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var rls bool
+	if err := db.QueryRowContext(ctx, "SELECT relrowsecurity FROM pg_class WHERE oid = 'public.notices'::regclass").Scan(&rls); err != nil {
+		t.Fatal(err)
+	}
+	if !rls {
+		t.Error("notices: row level security is off")
+	}
+	var before, after time.Time
+	if err := db.QueryRowContext(ctx, "SELECT updated_at FROM notices WHERE id = $1", n.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	// 트랜잭션 안의 now()는 고정이므로 별도 문장으로 고친다.
+	if err := db.QueryRowContext(ctx, "UPDATE notices SET is_hidden = true WHERE id = $1 RETURNING updated_at", n.ID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.After(before) {
+		t.Errorf("updated_at not bumped: before %v after %v", before, after)
+	}
+	if _, err := s.NoticeByID(ctx, n.ID, now); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("hidden seed: err = %v, want ErrNotFound", err)
 	}
 }

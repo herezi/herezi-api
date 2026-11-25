@@ -98,10 +98,12 @@ railway logs --service api                              # 런타임 로그
 URL=https://api-production-4ebcf3e2.up.railway.app
 curl -s $URL/healthz
 curl -s "$URL/v1/spots?lat=37.5663&lng=126.9779&radius_m=3000&when=week&limit=5"
+curl -s $URL/v1/notices                                     # 공지 목록(작성법: notices.md)
 ```
 
 ## 운영 메모
 - **Supabase 무료 7일 비활성 일시정지**: 매일 수집 cron이 DB에 쓰므로 정상이라면 멈추지 않는다. ingest 실패가 이어지면 Railway 로그를 확인하고, 멈췄으면 Supabase 대시보드에서 Restore.
 - **GPT 비용**: cron은 `-max-gpt 100`(새·바뀐 항목만, 해시 캐시). OpenAI 선불 잔액을 주기적으로 확인한다.
 - **data.go.kr 일일 한도**: 문화포털 상세(`detail2`)가 429면 그날은 목록 정보로만 저장하고 다음 날 보완된다.
+- **공지사항**: Supabase Table Editor에서 `notices` 행을 추가·수정한다(배포 불필요). [notices.md](notices.md)
 - **DB 노출**: public 테이블은 RLS + `anon`·`authenticated` 권한 회수(마이그레이션 00005). 새 테이블을 만드는 마이그레이션은 RLS를 같이 켠다.

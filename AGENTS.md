@@ -4,7 +4,7 @@
 
 ## 이 레포는
 Herezi("지금 내 주변에 뭐가 있는지") 서비스의 **Go 백엔드**.
-- `cmd/api`: 공개 REST API. **앱(iOS·Android)은 사용자 좌표를 서버로 보내지 않는다**(#74): 지역 데이터 파일(`GET /v1/regions/{region}/spots`)을 받아 근처·지도를 기기에서 계산한다(인증 없음). 좌표를 받는 `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 폐기 예고(앱 전환 후 제거). 로그인한 사용자의 저장 목록(`/v1/me/*`)만 Supabase JWT로 인증한다.
+- `cmd/api`: 공개 REST API. **앱(iOS·Android)은 사용자 좌표를 서버로 보내지 않는다**(#74): 지역 데이터 파일(`GET /v1/regions/{region}/spots`)을 받아 근처·지도를 기기에서 계산한다(인증 없음). 좌표를 받는 `/v1/spots`(근처)·`/v1/spots/map`·`/v1/geo/reverse`는 폐기 예고(앱 전환 후 제거). 로그인한 사용자의 저장 목록(`/v1/me/*`)만 Supabase JWT로 인증한다. 공지사항(`/v1/notices*`)은 웹 공지 페이지용 공개 읽기 API이고 이 경로에만 CORS를 연다(작성: [docs/ops/notices.md](docs/ops/notices.md)).
 - `cmd/ingest`: 공공데이터 수집 배치(수집 → 정규화 → 지오코딩 → 중복 제거 → GPT 보강 → 저장). DB가 없으면 JSON 스냅샷(`data/snapshot.json`, gitignore).
 - `api/openapi.yaml`: 서버·iOS·Android 사이 API 계약의 **단일 기준**.
 
