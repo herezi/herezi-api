@@ -184,6 +184,10 @@ func Run(t *testing.T, newStore func(t *testing.T) store.SpotStore) {
 			[]string{}},
 		{"bbox large includes far", func(q *store.BBoxQuery) { q.NeLat = baseLat + 0.2 },
 			[]string{"too-far", "far-exhibition-unknown", "mid-popup", "near-festival-free"}},
+		// 지역 데이터 파일(httpapi regionQuery): 제한 없음(Limit 0), Now를 창의 시작으로 당겨 최근 끝난 항목도 넣는다.
+		{"bbox no limit, earlier Now includes recently ended", func(q *store.BBoxQuery) {
+			q.Limit, q.Now, q.From, q.To = 0, Now.Add(-2*time.Hour), Now.Add(-2*time.Hour), Now.Add(48*time.Hour)
+		}, []string{"tomorrow", "ended", "mid-popup", "near-festival-free"}},
 	}
 	for _, tc := range bboxCases {
 		t.Run(tc.name, func(t *testing.T) {
