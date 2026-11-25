@@ -20,6 +20,7 @@
 3. **위치** 그룹
    - 행 **위치 권한** / 오른쪽 값 `type.body` `text.secondary`: **허용됨** · **대략적 위치만** · **허용 안 됨** + `chevron.right` → 시스템 앱 설정
 4. **정보** 그룹
+   - **공지사항** → 인앱 브라우저로 `https://herezi.github.io/notices/` (iOS `SFSafariViewController`, Android Custom Tabs). 앱에 공지 화면은 만들지 않는다. 공지는 웹사이트 저장소 `content/notices/*.md`로 관리한다(2026-11-25 결정). 정보 그룹 맨 위.
    - **정보 출처** → 출처 목록 화면(한국관광공사 TourAPI, KOPIS 공연예술통합전산망, 서울 열린데이터광장, 문화공공데이터광장, 산림청·기상청 — 각 행에 링크 `arrow.up.right`). 하단 안내 `type.caption`: **요약은 AI(OpenAI GPT)가 원문을 정리한 것이에요. 정확한 내용은 원문을 확인해 주세요.**
    - **이용약관** → 인앱 브라우저
    - **개인정보 처리방침** → 인앱 브라우저
